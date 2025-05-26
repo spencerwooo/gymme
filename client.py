@@ -42,6 +42,18 @@ class GymField:
     pref_score: int = 0  # Preference score for sorting, default is 0
 
 
+class GymServerError(Exception):
+    def __init__(self, status_code):
+        super().__init__(f"Server returned error with status code: {status_code}")
+        self.status_code = status_code
+
+
+class GymRequestError(Exception):
+    def __init__(self, code, msg):
+        super().__init__(f"Request failed with code {code}: {msg}")
+        self.msg = msg
+
+
 class GymClient:
     def __new__(cls):
         """GymClient is a singleton."""
@@ -83,11 +95,11 @@ class GymClient:
     @staticmethod
     async def parse_json_resp(resp):
         if resp.status_code != 200:
-            raise Exception(f"Request failed with status code {resp.status_code}")
+            raise GymServerError(resp.status_code)
         data = resp.json()
         data = GymResponse.from_json(data)
         if data.code != 1:
-            raise ValueError(f"Request failed with code {data.code}: {data.msg}")
+            raise GymRequestError(data.code, data.msg)
         return data.data
 
     async def _setup(self):
