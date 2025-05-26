@@ -65,11 +65,11 @@ async def start_daemon():
     await gym._setup()
     log.info("Starting daemon ... 百丽宫中关村羽毛球捡漏王已开启！")
 
-    days = [gym.create_relative_date(offset) for offset in args.days]
-    log.info(f"Checking available fields for days {', '.join(days)}")
-
     while True:
         try:
+            days = [gym.create_relative_date(offset) for offset in args.days]
+            log.info(f"Checking fields for days: {days}")
+
             for day, offset in zip(days, args.days):
                 available_fields = await gym.get_available_fields(offset)
                 pref_fields = gym.generate_preferred_field_scenes(available_fields)
