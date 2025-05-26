@@ -62,6 +62,7 @@ def sc_send(title: str, desp: str = "", sendkey: str = SEND_KEY) -> None:
 async def start_daemon():
     args = parse_args()
     gym = GymClient()
+    await gym._setup()
     log.info("Starting daemon ... 百丽宫中关村羽毛球捡漏王已开启！")
 
     days = [gym.create_relative_date(offset) for offset in args.days]
