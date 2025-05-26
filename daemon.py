@@ -67,21 +67,26 @@ async def start_daemon():
 
     while True:
         try:
+            # Loop over each day offset via date
             days = [gym.create_relative_date(offset) for offset in args.days]
-            log.info(f"Checking fields for days: {days}")
+            log.info(f"Checking field schedule for days: {days}")
 
             for day, offset in zip(days, args.days):
-                available_fields = await gym.get_available_fields(offset)
-                pref_fields = gym.generate_preferred_field_scenes(available_fields)
-                if not pref_fields:
+                # Get available fields for the day
+                fields_available = await gym.get_available_fields(offset)
+
+                # Create field scene candidates, sorted by preference
+                field_candidates = gym.create_field_scenes_candidate(fields_available)
+                if not field_candidates:
                     log.info(f"No preferred fields available for {day}. Skipping...")
                     continue
 
-                log.info(f"{len(available_fields)} available fields for {day}:\n{list_fields(available_fields)}")
-                for pref_field in pref_fields:
-                    order_attempt_details = f"{day} {[f.field_desc for f in pref_field]}"
+                # Try to create an order with preferred fields sequentially
+                log.info(f"{len(fields_available)} available fields for {day}:\n{list_fields(fields_available)}")
+                for field in field_candidates:
+                    order_attempt_details = f"{day} {[f.field_desc for f in field]}"
                     try:
-                        payment_url = await gym.create_order(offset, day, pref_field)
+                        payment_url = await gym.create_order(offset, day, field)
                         log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
                         sc_send(
                             title=f"Order created for {order_attempt_details}",

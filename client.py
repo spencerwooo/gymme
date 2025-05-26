@@ -222,19 +222,20 @@ class GymClient:
             for hour_id, hour in self.hours.items():
                 status = schedule_booked.get(f"{field_id}-{hour_id}", -1)
                 if status == 0:
-                    field = GymField(
-                        field_id,
-                        hour_id,
-                        day_type=hour["daytype"],
-                        field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
+                    available_fields.append(
+                        GymField(
+                            field_id,
+                            hour_id,
+                            day_type=hour["daytype"],
+                            field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
+                        )
                     )
-                    available_fields.append(field)
-        # [{'field_id': '222', 'hour_id': 328240, 'price': 50, 'field_description': '主馆3 (20:00-21:00)'}]
         return available_fields
 
     @staticmethod
-    def generate_preferred_field_scenes(available_fields):
-        fields_by_pref = []
+    def create_field_scenes_candidate(available_fields):
+        """Select and sort field scenes by preference scores, prepare for booking."""
+        field_candidates = []
         for f in available_fields:
             field_pref = field_preference.get(f.field_id, 0)
             hour_pref = hour_preference.get(str(f.hour_id), 0)
@@ -242,23 +243,23 @@ class GymClient:
             # Only consider fields with positive preferences
             if field_pref > 0 and hour_pref > 0:
                 f.pref_score = field_pref + hour_pref
-                fields_by_pref.append(f)
-
-        # Sort by preference score (higher is better)
-        fields_by_pref.sort(key=lambda x: x.pref_score, reverse=True)
+                field_candidates.append(f)
 
         # Check for consecutive hours (2 hours at most), and group them as tuples
-        field_pairs = []
+        field_candidate_pairs = []
 
-        for i, field1 in enumerate(fields_by_pref):
-            for field2 in fields_by_pref[i + 1 :]:
+        for i, field1 in enumerate(field_candidates):
+            for field2 in field_candidates[i + 1 :]:
                 # Same field and consecutive hours
                 if field1.field_id == field2.field_id and field2.hour_id == field1.hour_id + 1:
-                    field_pairs.append([field1, field2])
+                    field_candidate_pairs.append([field1, field2])
 
         # Single fields are still considered
-        field_pairs.extend([[f] for f in fields_by_pref])
-        return field_pairs
+        field_candidate_pairs.extend([[f] for f in field_candidates])
+
+        # Sort both pairs and singles by preference score
+        field_candidate_pairs.sort(key=lambda x: sum(f.pref_score for f in x), reverse=True)
+        return field_candidate_pairs
 
 
 def show_schedule_table(day, schedule_booked, fields, hours):
