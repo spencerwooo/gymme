@@ -20,19 +20,29 @@ log = logging.getLogger("rich")
 def parse_args():
     parser = argparse.ArgumentParser(description="gymy daemon -- 百丽宫中关村羽毛球捡漏王已开启！")
     parser.add_argument("--days", nargs="+", type=int, default=[0], help="Days offset to monitor (e.g., --days 0 1 2)")
-    parser.add_argument("--interval", type=int, default=300, help="Interval between checks (default: 300 secs)")
+    parser.add_argument("--interval", type=int, default=600, help="Interval between checks (default: 600 secs)")
     parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests (default: 10 secs)")
     parser.add_argument("--log-level", type=str, default="INFO", help="Logging level (default: INFO)")
     return parser.parse_args()
 
 
-def list_fields(fields: list[list[GymField]]) -> str:
-    """Format list of fields for logging"""
-    repr = "; ".join(str([i.field_desc for i in f]) for f in fields[:3]) if fields else ""
-    return repr + ("; ..." if len(fields) > 3 else "")
+def list_fields(fields: list[list[GymField]] | list[GymField]) -> str:
+    """Format list of fields for logging."""
+    if not fields:
+        return ""
+
+    # Handle single layer list (available fields)
+    if fields and isinstance(fields[0], GymField):
+        repr = "; ".join(f.field_desc for f in fields[:3])
+        return repr + ("; ..." if len(fields) > 3 else "")
+
+    # Handle list of lists (preferred field scenes)
+    repr = "; ".join(str([i.field_desc for i in f]) for f in fields[:6])
+    return repr + ("; ..." if len(fields) > 6 else "")
 
 
-def sc_send(title, desp="", sendkey=SEND_KEY):
+def sc_send(title: str, desp: str = "", sendkey: str = SEND_KEY) -> None:
+    """Send notification using ServerChan."""
     if sendkey.startswith("sctp"):
         match = re.match(r"sctp(\d+)t", sendkey)
         if match:
@@ -66,7 +76,7 @@ async def start_daemon():
                     log.info(f"No preferred fields available for {day}. Skipping...")
                     continue
 
-                log.info(f"{len(pref_fields)} available fields for {day}:\n{list_fields(pref_fields)}")
+                log.info(f"{len(available_fields)} available fields for {day}:\n{list_fields(available_fields)}")
                 for pref_field in pref_fields:
                     order_attempt_details = f"{day} {[f.field_desc for f in pref_field]}"
                     try:
