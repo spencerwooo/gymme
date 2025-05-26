@@ -8,7 +8,7 @@ import httpx
 from dotenv import load_dotenv
 from rich.logging import RichHandler
 
-from client import GymClient, GymField
+from client import GymClient, GymField, GymRequestError, GymServerError
 
 load_dotenv()
 SEND_KEY = os.getenv("SEND_KEY", "")
@@ -22,23 +22,25 @@ def parse_args():
     parser.add_argument("--days", nargs="+", type=int, default=[0], help="Days offset to monitor (e.g., --days 0 1 2)")
     parser.add_argument("--interval", type=int, default=600, help="Interval between checks (default: 600 secs)")
     parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests (default: 10 secs)")
-    parser.add_argument("--log-level", type=str, default="INFO", help="Logging level (default: INFO)")
+    parser.add_argument("--max-retries", type=int, default=3, help="Retry attempts for server errors (default: 3)")
     return parser.parse_args()
 
 
-def list_fields(fields: list[list[GymField]] | list[GymField]) -> str:
+def fields_repr(fields: list[list[GymField]] | list[GymField]) -> str:
     """Format list of fields for logging."""
     if not fields:
         return ""
 
     # Handle single layer list (available fields)
-    if fields and isinstance(fields[0], GymField):
-        repr = "; ".join(f.field_desc for f in fields[:3])
-        return repr + ("; ..." if len(fields) > 3 else "")
+    if isinstance(fields[0], GymField):
+        field_descs = [f.field_desc for f in fields[:3]]
+        suffix = "; ..." if len(fields) > 3 else ""
+        return "; ".join(field_descs) + suffix
 
     # Handle list of lists (preferred field scenes)
-    repr = "; ".join(str([i.field_desc for i in f]) for f in fields[:6])
-    return repr + ("; ..." if len(fields) > 6 else "")
+    scene_descs = [str([f.field_desc for f in scene]) for scene in fields[:6]]
+    suffix = "; ..." if len(fields) > 6 else ""
+    return "; ".join(scene_descs) + suffix
 
 
 def sc_send(title: str, desp: str = "", sendkey: str = SEND_KEY) -> None:
@@ -81,30 +83,65 @@ async def start_daemon():
                     log.info(f"No preferred fields available for {day}. Skipping...")
                     continue
 
-                # Try to create an order with preferred fields sequentially
-                log.info(f"{len(fields_available)} available fields for {day}:\n{list_fields(fields_available)}")
+                log.info(f"{len(fields_available)} available fields for {day}:\n{fields_repr(fields_available)}")
                 for field in field_candidates:
+                    # Try to create an order with preferred fields sequentially
                     order_attempt_details = f"{day} {[f.field_desc for f in field]}"
-                    try:
-                        payment_url = await gym.create_order(offset, day, field)
-                        log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
-                        sc_send(
-                            title=f"Order created for {order_attempt_details}",
-                            desp=f"Please complete the payment within 10 minutes:\n\n[{payment_url}]({payment_url})",
-                            sendkey=SEND_KEY,
-                        )
-                        break
-                    except Exception as e:
-                        log.error(f"Failed to create order for {order_attempt_details}: {e}")
+                    log.info(f"Attempting to create order for {order_attempt_details} ...")
+
+                    # Retry logic for server errors
+                    payment_url = None
+                    for i in range(args.max_retries):
+                        try:
+                            payment_url = await gym.create_order(offset, day, field)
+                            log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
+                            sc_send(
+                                title="Order created successfully! 😊",
+                                desp=f"Order **{order_attempt_details}** created!\n"
+                                f"Please complete the payment within 10 minutes:\n\n[{payment_url}]({payment_url})",
+                            )
+                            break
+
+                        # Retry only on server errors (500s) when the server is loaded at peak times
+                        except GymServerError as e:
+                            if i < args.max_retries - 1:
+                                log.warning(f"Server error on attempt {i + 1}/{args.max_retries}: {e}. Retrying...")
+                                await asyncio.sleep(0.5)
+                                continue
+                            else:
+                                log.error(f"Server error after {args.max_retries} attempts: {e}")
+                                break
+
+                        except GymRequestError as e:
+                            log.error(e)
+                            sc_send(
+                                title="Order attempted but failed 😥",
+                                desp=f"Order **{order_attempt_details}** failed to create:\n\n> {e}",
+                            )
+                            break
+
+                        # Catch all other exceptions that may occur
+                        except Exception as e:
+                            log.exception(f"Unexpected error for {order_attempt_details}:\n{e}")
+                            break
+                    else:
+                        # This else clause executes if the for loop completed without breaking
+                        # (i.e., all retries failed due to GymServerError)
                         await asyncio.sleep(args.req_interval)
                         continue
 
+                    # If we successfully created an order, break out of the field candidates loop
+                    if payment_url:
+                        break
+
+                    await asyncio.sleep(args.req_interval)
             await asyncio.sleep(args.interval)
         except KeyboardInterrupt:
             log.info("Gracefully shutting down ...")
             break
         except Exception as e:
-            log.exception(e)
+            log.exception(f"An error occurred in the daemon:\n{e}")
+            await asyncio.sleep(args.interval)
             continue
 
 
