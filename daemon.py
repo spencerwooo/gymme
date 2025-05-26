@@ -102,28 +102,25 @@ async def start_daemon():
                             )
                             break
 
-                        # Retry only on server errors (500s) when the server is loaded at peak times
-                        except GymServerError as e:
+                        # For known exceptions, make full use of retries
+                        except (GymServerError, GymRequestError) as e:
                             if i < args.max_retries - 1:
-                                log.warning(f"Server error on attempt {i + 1}/{args.max_retries}: {e}. Retrying...")
-                                await asyncio.sleep(0.5)
+                                log.warning(f"Attempt {i + 1}/{args.max_retries} failed with: {e}. Retrying...")
+                                await asyncio.sleep(args.req_interval if isinstance(e, GymRequestError) else 0.5)
                                 continue
                             else:
-                                log.error(f"Server error after {args.max_retries} attempts: {e}")
+                                log.error(f"Failed to create order after {args.max_retries} attempts: {e}")
+                                sc_send(
+                                    title="Order creation failed 😥",
+                                    desp=f"Order **{order_attempt_details}** failed to create:\n\n> {e}",
+                                )
                                 break
 
-                        except GymRequestError as e:
-                            log.error(e)
-                            sc_send(
-                                title="Order attempted but failed 😥",
-                                desp=f"Order **{order_attempt_details}** failed to create:\n\n> {e}",
-                            )
+                        # Catch all other unexpected exceptions and break out of the retry loop
+                        except Exception as e:
+                            log.error(f"Unexpected error during order creation: {e}")
                             break
 
-                        # Catch all other exceptions that may occur
-                        except Exception as e:
-                            log.exception(f"Unexpected error for {order_attempt_details}:\n{e}")
-                            break
                     else:
                         # This else clause executes if the for loop completed without breaking
                         # (i.e., all retries failed due to GymServerError)
@@ -135,7 +132,10 @@ async def start_daemon():
                         break
 
                     await asyncio.sleep(args.req_interval)
+
+            # Wait before the next check
             await asyncio.sleep(args.interval)
+
         except KeyboardInterrupt:
             log.info("Gracefully shutting down ...")
             break
