@@ -17,6 +17,7 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN", "")
 OPEN_ID = os.getenv("OPEN_ID", "")
 
+SPORT_ID = 49
 
 @dataclass
 class GymResponse:
@@ -77,6 +78,7 @@ class GymClient:
         self.client = hishel.AsyncCacheClient(headers=self.headers)
         self.fields = None
         self.hours = None
+        self.bookinginfo = None
 
     @staticmethod
     def create_relative_date(offset: int = 0) -> str:
@@ -90,6 +92,9 @@ class GymClient:
         data = GymResponse.from_json(data)
         if data.code != 1:
             raise GymRequestError(data.code, data.msg)
+        
+        if data.data is None:
+            return data
         return data.data
 
     async def setup(self) -> None:
@@ -124,7 +129,7 @@ class GymClient:
         Field ids: [220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231]
         Field names: [主馆1, 主馆2, 主馆3, 主馆4, 主馆5, 主馆6, 主馆7, 主馆8, 副馆9, 副馆10, 副馆11, 副馆12]
         """
-        url = "http://gym.dazuiwl.cn/api/sport_events/field/id/51"
+        url = f"http://gym.dazuiwl.cn/api/sport_events/field/id/{SPORT_ID}"
         data = await self._create_gym_request(url)
         return {k: v["name"] for k, v in data.items()}
 
@@ -136,7 +141,7 @@ class GymClient:
                     16-17, 17-18, 18-19, 19-20, 20-21, 21-22]
         Day types: [morning, day, night]
         """
-        url = "http://gym.dazuiwl.cn/api/sport_events/hour/id/51"
+        url = f"http://gym.dazuiwl.cn/api/sport_events/hour/id/{SPORT_ID}"
         data = await self._create_gym_request(url)
         return {
             d["id"]: {
@@ -154,7 +159,7 @@ class GymClient:
         Price (on weekdays): 10, 20, 50
         Price (on weekends): 20, 50, 50
         """
-        url = "http://gym.dazuiwl.cn/api/sport_events/price/id/51"
+        url = f"http://gym.dazuiwl.cn/api/sport_events/price/id/{SPORT_ID}"
         params = {"week": week, "day": day}
         return await self._create_gym_request(url, params=params)
 
@@ -163,7 +168,7 @@ class GymClient:
         Schedule: {'<field_id>-<hour_id>': <status_id>, ...}
         Status: 0 - available, others - booked
         """
-        url = "http://gym.dazuiwl.cn/api/sport_schedule/booked/id/51"
+        url = f"http://gym.dazuiwl.cn/api/sport_schedule/booked/id/{SPORT_ID}"
         return await self._create_gym_request(url, params={"day": day}, cache=False)
 
     async def get_prices(self, week: int, day: str) -> dict:
@@ -178,6 +183,77 @@ class GymClient:
             # Only difference is weekend v.s. weekday prices, perform check to see if target date is weekend
             prices = prices_cfg["weekend" if datetime.strptime(day, "%Y-%m-%d").weekday() >= 5 else "weekday"]
         return prices
+
+    async def get_personal_bookinglist(self) -> dict:
+        """
+        Get the personal booking list.
+        Return JSON.
+        """
+        url = "http://gym.dazuiwl.cn/api/order/index?ordertype=makeappointment&status=&orderid=&page=1&limit=20"
+        return await self._create_gym_request(url)
+
+    async def check_personal_bookinginfo(self, booking_list=None) -> list[dict]:
+        """
+        The return is a list of dicts, each containing:
+            - orderid: str
+            - status: str, (e.g., 'paid', 'expired')
+            - scene: [{'day': str, 'fields': {field_id: [hour_id, ...], ...}}]
+        Example return value:
+        [
+            {'orderid': '20250520185550349313', 'status': 'paid', 'scene': [{'day': '2025-05-21', 'fields': {'224': [328228, 328229]}}]}
+        ]
+        """
+        if booking_list is None:
+            raw_json = await self.get_personal_bookinglist()
+        else:
+            raw_json = booking_list
+        
+        if not raw_json:
+            raise ValueError("No booking information found")
+        
+        # parse raw_json，get orderid & status & scene
+        result = []
+        for item in raw_json.get("list", []):
+            orderid = item.get("orderid")
+            status = item.get("status")
+            scene = item["config"].get("scene")
+            result.append({
+                "orderid": orderid,
+                "status": status,
+                "scene": scene,
+            })
+        self.bookinginfo = result
+        return result
+
+    async def cancel_order_by_id(self, order_id: str) -> bool:
+        """
+        Cancel an order by order_id.
+        Returns True if successful, False otherwise.
+        """
+        url = f"http://gym.dazuiwl.cn/api/order/cancel/orderid/{order_id}"
+        resp = await self._create_gym_request(url, method="PUT")
+        return resp.code == 1
+
+    async def cancel_order_by_field(self, field: GymField, day: str) -> bool:
+        """
+        Cancel an order by GymField.
+        Returns True if successful, False otherwise.
+        """
+        if not self.bookinginfo:
+            await self.check_personal_bookinginfo()
+
+        for booking in self.bookinginfo:
+            booking_day = booking["scene"][0]["day"]
+            booking_hours = booking["scene"][0]["fields"].get(field.field_id, [])
+            if not booking_hours:
+                continue
+            if field.hour_id in booking_hours and booking_day == day:
+                order_id = booking["orderid"]
+                break
+        else:
+            return False
+        
+        return await self.cancel_order_by_id(order_id)
 
     async def create_order(self, week: int, day: str, fields: list[GymField]) -> str:
         assert len(fields) > 0, "At least 1 field must be selected"
@@ -202,7 +278,7 @@ class GymClient:
         data = {
             "orderid": "",
             "card_id": "",
-            "sport_events_id": "51",
+            "sport_events_id": f"{SPORT_ID}",
             "money": money,
             "ordertype": "makeappointment",
             "paytype": "bitpay",
@@ -315,17 +391,46 @@ def show_schedule_table(day: str, schedule_booked: dict, fields: dict, hours: di
     print(table)
 
 
+async def test_cancel_order():
+    gym = GymClient()
+    print(await gym.check_personal_bookinginfo())
+    
+    # print(await gym.cancel_order_by_id("20250527190804352568"))
+
+    offset = 2
+    day = gym.create_relative_date(offset)
+    await gym._setup()
+
+    field_id = "213"
+    hour_id = 328262
+    hour = gym.hours[hour_id]
+    field_name = gym.fields[field_id]
+    
+    field = GymField(
+        field_id,
+        hour_id,
+        day_type=hour["daytype"],
+        field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
+    )
+
+    print(await gym.cancel_order_by_field(field, day))
+
+    print(await gym.check_personal_bookinginfo())
+
 async def main():
     gym = GymClient()
 
     # today = 0, tomorrow = 1, day after tomorrow = 2
     offset = 1
     day = gym.create_relative_date(offset)
-    await gym.setup()
+
+    await gym._setup()
+    schedule_booked = await gym.get_sport_schedule_booked(day)
 
     # Print schedule table
     schedule_booked = await gym.get_sport_schedule_booked(day)
     show_schedule_table(day, schedule_booked, gym.fields, gym.hours)
+
 
 
 if __name__ == "__main__":
