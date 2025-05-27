@@ -28,7 +28,26 @@ def parse_args():
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent order attempts during eager mode")
     parser.add_argument("--refresh-time", type=str, default="07:00", help="Schedule refresh time (HH:MM format)")
     parser.add_argument("--max-retries", type=int, default=3, help="Retry attempts for server errors")
+    parser.add_argument("--consider-solo-fields", action="store_true", help="Consider solo fields (1 hour)")
     return parser.parse_args()
+
+
+def banner_repr() -> str:
+    return (
+        "\n"
+        "      ___           ___           ___           ___     \n"
+        "     /\\  \\         |\\__\\         /\\__\\         |\\__\\    \n"
+        "    /::\\  \\        |:|  |       /::|  |        |:|  |   \n"
+        "   /:/\\:\\  \\       |:|  |      /:|:|  |        |:|  |   \n"
+        "  /:/  \\:\\  \\      |:|__|__   /:/|:|__|__      |:|__|__ \n"
+        " /:/__/_\\:\\__\\     /::::\\__\\ /:/ |::::\\__\\     /::::\\__\\\n"
+        " \\:\\  /\\ \\/__/    /:/~~/~    \\/__/~~/:/  /    /:/~~/~   \n"
+        "  \\:\\ \\:\\__\\     /:/  /            /:/  /    /:/  /     \n"
+        "   \\:\\/:/  /     \\/__/            /:/  /     \\/__/      \n"
+        "    \\::/  /                      /:/  /                 \n"
+        "     \\/__/                       \\/__/                  \n"
+        "\n"
+    )
 
 
 def fields_repr(fields: list[list[GymField]] | list[GymField]) -> str:
@@ -114,6 +133,7 @@ async def start_normal_monitor(
     offsets: list[int],
     max_retries: int,
     req_interval: int,
+    consider_solo_fields: bool = False,
 ) -> bool:
     """Normal monitoring strategy."""
     days: list[str] = [gym.create_relative_date(offset) for offset in offsets]
@@ -125,11 +145,14 @@ async def start_normal_monitor(
         fields_available: list[GymField] = await gym.get_available_fields(offset)
 
         # Create field scene candidates, sorted by preference
-        field_candidates: list[list[GymField]] = gym.create_field_scenes_candidate(fields_available)
+        field_candidates: list[list[GymField]] = gym.create_field_scenes_candidate(
+            fields_available, consider_solo_fields=consider_solo_fields
+        )
         if not field_candidates:
             log.info(f"No preferred fields available for {day}. Skipping...")
             continue
 
+        # Sequentially attempt to create orders for each field scene
         log.info(f"{len(fields_available)} available fields for {day}:\n{fields_repr(fields_available)}")
         for field in field_candidates:
             order_succeeded = await make_order_attempt(
@@ -272,7 +295,8 @@ async def daemon_sleep(
 async def start_daemon():
     args = parse_args()
     gym = GymClient()
-    log.info("Starting daemon ... 百丽宫中关村羽毛球捡漏王已开启！")
+    log.info("百丽宫中关村羽毛球捡漏王已开启！")
+    log.info(banner_repr())
 
     while True:
         try:
@@ -307,6 +331,7 @@ async def start_daemon():
                     offsets=args.days,
                     max_retries=args.max_retries,
                     req_interval=args.req_interval,
+                    consider_solo_fields=args.consider_solo_fields,
                 )
 
             # Break the loop if an order was successfully created
