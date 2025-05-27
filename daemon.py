@@ -142,18 +142,17 @@ async def start_normal_monitor(
     # Loop over each day offset via date
     for day, offset in zip(days, offsets):
         # Get available fields for the day
-        fields_available: list[GymField] = await gym.get_available_fields(offset)
+        fields_available = await gym.get_available_fields(offset)
+        if fields_available:
+            log.info(f"{len(fields_available)} available fields for {day}:\n{fields_repr(fields_available)}")
 
         # Create field scene candidates, sorted by preference
-        field_candidates: list[list[GymField]] = gym.create_field_scenes_candidate(
-            fields_available, consider_solo_fields=consider_solo_fields
-        )
+        field_candidates = gym.create_field_scenes_candidate(fields_available, consider_solo_fields)
         if not field_candidates:
             log.info(f"No preferred fields available for {day}. Skipping...")
             continue
 
         # Sequentially attempt to create orders for each field scene
-        log.info(f"{len(fields_available)} available fields for {day}:\n{fields_repr(fields_available)}")
         for field in field_candidates:
             order_succeeded = await make_order_attempt(
                 gym=gym,
