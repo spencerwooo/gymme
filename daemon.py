@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from enum import Enum
 
 import httpx
 from dotenv import load_dotenv
@@ -21,9 +22,12 @@ log = logging.getLogger("rich")
 def parse_args():
     parser = argparse.ArgumentParser(description="gymy daemon -- 百丽宫中关村羽毛球捡漏王已开启！")
     parser.add_argument("--days", nargs="+", type=int, default=[0], help="Days offset to monitor (e.g., --days 0 1 2)")
-    parser.add_argument("--interval", type=int, default=600, help="Interval between checks (default: 600 secs)")
-    parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests (default: 10 secs)")
-    parser.add_argument("--max-retries", type=int, default=3, help="Retry attempts for server errors (default: 3)")
+    parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests to avoid rate limits")
+    parser.add_argument("--interval", type=int, default=600, help="Interval between checks")
+    parser.add_argument("--eager-interval", type=int, default=120, help="Interval for eager checking")
+    parser.add_argument("--concurrency", type=int, default=3, help="Concurrent order attempts during eager mode")
+    parser.add_argument("--refresh-time", type=str, default="07:00", help="Schedule refresh time (HH:MM format)")
+    parser.add_argument("--max-retries", type=int, default=3, help="Retry attempts for server errors")
     return parser.parse_args()
 
 
@@ -61,14 +65,57 @@ def sc_send(title: str, desp: str = "", sendkey: str = SEND_KEY) -> None:
     log.info(f"Notification server response: {resp.json()}")
 
 
+async def make_order_attempt(
+    gym: GymClient,
+    offset: int,
+    day: str,
+    field: list[GymField],
+    max_retries: int,
+    req_interval: int,
+) -> bool:
+    order_attempt_details = f"{day} {[f.field_desc for f in field]}"
+    log.info(f"Attempting to create order for {order_attempt_details} ...")
+
+    for i in range(max_retries):
+        try:
+            payment_url = await gym.create_order(offset, day, field)
+            log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
+            sc_send(
+                title="百丽宫羽毛球订单创建成功！",
+                desp=f"订单 **{order_attempt_details}** 已创建！\n"
+                f"请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
+            )
+            return True
+
+        # For known exceptions, make full use of retries
+        except (GymServerError, GymRequestError, httpx.HTTPError) as e:
+            if i < max_retries - 1:
+                log.warning(f"Attempt {i + 1}/{max_retries} failed with: {e}. Retrying...")
+                await asyncio.sleep(req_interval if isinstance(e, GymRequestError) else 0.5)
+                continue
+            else:
+                log.error(f"Failed to create order after {max_retries} attempts: {e}")
+                # sc_send(
+                #     title="百丽宫羽毛球订单创建失败",
+                #     desp=f"订单 **{order_attempt_details}** 创建失败：\n\n> {e}",
+                # )
+                break
+
+        # Catch all other unexpected exceptions and break out of the retry loop
+        except Exception as e:
+            log.error(f"Unexpected error during order creation: {e}")
+            break
+
+    return False
+
+
 async def start_normal_monitor(
     gym: GymClient,
     offsets: list[int],
     max_retries: int,
     req_interval: int,
 ) -> bool:
-    """Normal monitoring strategy for 8:00-24:00 period."""
-
+    """Normal monitoring strategy."""
     days: list[str] = [gym.create_relative_date(offset) for offset in offsets]
     log.info(f"Checking field schedule for days: {days}")
 
@@ -85,66 +132,141 @@ async def start_normal_monitor(
 
         log.info(f"{len(fields_available)} available fields for {day}:\n{fields_repr(fields_available)}")
         for field in field_candidates:
-            # Try to create an order with preferred fields sequentially
-            order_attempt_details: str = f"{day} {[f.field_desc for f in field]}"
-            log.info(f"Attempting to create order for {order_attempt_details} ...")
+            order_succeeded = await make_order_attempt(
+                gym=gym,
+                offset=offset,
+                day=day,
+                field=field,
+                max_retries=max_retries,
+                req_interval=req_interval,
+            )
 
-            # Retry logic for server errors
-            payment_url: str | None = None
-            for i in range(max_retries):
-                try:
-                    payment_url = await gym.create_order(offset, day, field)
-                    log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
-                    sc_send(
-                        title="百丽宫羽毛球订单创建成功！",
-                        desp=f"订单 **{order_attempt_details}** 已创建！\n"
-                        f"请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
-                    )
-                    return True
-
-                # For known exceptions, make full use of retries
-                except (GymServerError, GymRequestError) as e:
-                    if i < max_retries - 1:
-                        log.warning(f"Attempt {i + 1}/{max_retries} failed with: {e}. Retrying...")
-                        await asyncio.sleep(req_interval if isinstance(e, GymRequestError) else 0.5)
-                        continue
-                    else:
-                        log.error(f"Failed to create order after {max_retries} attempts: {e}")
-                        sc_send(
-                            title="百丽宫羽毛球订单创建失败",
-                            desp=f"订单 **{order_attempt_details}** 创建失败：\n\n> {e}",
-                        )
-                        break
-
-                # Catch all other unexpected exceptions and break out of the retry loop
-                except Exception as e:
-                    log.error(f"Unexpected error during order creation: {e}")
-                    break
-
+            if order_succeeded:
+                return True  # Exit if an order was successfully created
             else:
-                # This else clause executes if the for loop completed without breaking
-                # (i.e., all retries failed due to GymServerError)
                 await asyncio.sleep(req_interval)
-                continue
-
-            # If we successfully created an order, break out of the field candidates loop
-            if payment_url:
-                return True
-
-            await asyncio.sleep(req_interval)
 
     return False
 
 
 async def start_eager_order(
     gym: GymClient,
-    offsets: list[int],
     max_retries: int,
     req_interval: int,
+    concurrency: int = 3,
+    target_time: str = "07:00",
 ) -> bool:
-    """Proactive ordering strategy for 7:00-8:00 period."""
-    log.info("Proactive ordering strategy is not implemented yet.")
-    return False  # Placeholder for future implementation
+    """Eager ordering strategy for peak hours."""
+    # Only activate for day with offset=2 (day after tomorrow)
+    offset = 2
+    day = gym.create_relative_date(offset)
+
+    # (Warm up) Load available fields for the day and create candidates used for the entire period
+    fields_available = await gym.get_available_fields(offset)
+    field_candidates = gym.create_field_scenes_candidate(fields_available)
+    if not field_candidates:
+        log.info(f"No preferred fields available for {day}.")
+        return False
+
+    log.info(f"{len(fields_available)} available fields for {day}:\n{fields_repr(fields_available)}")
+
+    # Fire off at exactly target_time (default: 7:00 AM)
+    now = datetime.now().time()
+    target_time = datetime.strptime(target_time, "%H:%M").time()
+    if now < target_time:
+        delay = (datetime.combine(datetime.now().date(), target_time) - datetime.now()).total_seconds()
+        log.info(f"Warmed up. Waiting {delay:.0f} seconds until 7:00 AM...")
+        await asyncio.sleep(delay)
+
+    # Process field candidates in batches based on concurrency
+    for i in range(0, len(field_candidates), concurrency):
+        batch = field_candidates[i : i + concurrency]
+
+        # Create tasks for concurrent order attempts
+        tasks = []
+        for field in batch:
+            task = make_order_attempt(
+                gym=gym,
+                offset=offset,
+                day=day,
+                field=field,
+                max_retries=max_retries,
+                req_interval=req_interval,
+            )
+            tasks.append(task)
+
+        # Execute batch concurrently and wait for any successful order
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Check if any order in the batch succeeded
+        for result in results:
+            if isinstance(result, bool) and result:
+                return True
+
+        # If no order succeeded in this batch, continue to next batch
+        if i + concurrency < len(field_candidates):
+            await asyncio.sleep(req_interval)
+
+    return False
+
+
+class StrategyMode(Enum):
+    NORMAL = "normal"
+    EAGER = "eager"
+    HIBERNATE = "hibernate"
+
+    @classmethod
+    def from_time(
+        cls,
+        now: datetime.time,
+        eager_time: tuple[str, str] = ("6:55", "7:29"),
+        normal_time: tuple[str, str] = ("7:30", "23:59"),
+    ) -> "StrategyMode":
+        """Resolve strategy mode based on current time."""
+
+        def parse_time(time_str: str) -> datetime.time:
+            """Parse time string in HH:MM format to datetime.time object."""
+            return datetime.strptime(time_str, "%H:%M").time()
+
+        eager_start = parse_time(eager_time[0])
+        eager_end = parse_time(eager_time[1])
+        normal_start = parse_time(normal_time[0])
+        normal_end = parse_time(normal_time[1])
+
+        if eager_start <= now <= eager_end:
+            return cls.EAGER
+        elif normal_start <= now <= normal_end:
+            return cls.NORMAL
+        else:
+            return cls.HIBERNATE
+
+
+async def daemon_sleep(
+    mode: StrategyMode,
+    eager_interval: int,
+    normal_interval: int,
+    eager_start: tuple[int, int] = (6, 55),
+) -> None:
+    """Automatically resolve sleep interval based on the current time and strategy mode."""
+    now = datetime.now().time()
+    eager_hour, eager_minute = eager_start
+
+    if mode == StrategyMode.HIBERNATE:
+        interval = (eager_hour - now.hour - 1) * 3600
+        interval += (eager_minute - now.minute - 1) * 60 + (60 - now.second)
+        interval %= 24 * 3600
+        if now.hour == eager_hour:  # if current hour is 6, adjust sleep time
+            interval = (eager_minute - now.minute - 1) * 60 + (60 - now.second)
+        if interval <= 0:  # handle edge case if it's exactly 6:55 (eager time) or a bit past
+            interval = 1  # sleep for a short duration and re-evaluate
+    elif mode == StrategyMode.EAGER:
+        interval = eager_interval
+    elif mode == StrategyMode.NORMAL:
+        interval = normal_interval
+    else:
+        interval = 60  # Default fallback interval (1 minute)
+
+    await asyncio.sleep(interval)
 
 
 async def start_daemon():
@@ -156,57 +278,49 @@ async def start_daemon():
         try:
             await gym.setup()
 
+            # Resolve strategy mode based on current time
             now = datetime.now().time()
+            strategy_mode = StrategyMode.from_time(now)
+
             order_created = False
 
-            # Hibernate period: 0:00 - 6:57
-            if now.hour < 6 or (now.hour == 6 and now.minute < 58):
-                log.info(f"Current time {now:%H:%M:%S}. Hibernating until 6:58.")
-                # Calculate sleep duration until 6:58
-                sleep_secs = ((6 - now.hour - 1) * 3600 + (58 - now.minute - 1) * 60 + (60 - now.second)) % (24 * 3600)
-                if now.hour == 6:  # if current now.hour is 6, adjust sleep time
-                    sleep_secs = (58 - now.minute - 1) * 60 + (60 - now.second)
-                if sleep_secs <= 0:  # handle edge case if it's exactly 6:58 or a bit past
-                    sleep_secs = 1  # sleep for a short duration and re-evaluate
-                log.info(f"Sleeping for {sleep_secs} seconds.")
-                await asyncio.sleep(sleep_secs)
-                continue  # Re-evaluate time after waking up
+            # Hibernate period: 0:00 - 6:54
+            if strategy_mode == StrategyMode.HIBERNATE:
+                log.info(f"Current time [{now:%H:%M:%S}]. Daemon hibernating ...")
 
-            # Proactive ordering period: 6:58 - 7:59
-            elif (now.hour == 6 and now.minute >= 58) or now.hour == 7:
-                log.info(f"Current time {now:%H:%M:%S}. Starting proactive ordering strategy.")
+            # Eager ordering period: 6:55 - 7:29
+            elif strategy_mode == StrategyMode.EAGER:
+                log.info(f"Current time [{now:%H:%M:%S}]. Starting eager ordering strategy.")
                 order_created = await start_eager_order(
                     gym=gym,
-                    offsets=args.days,
                     max_retries=args.max_retries,
                     req_interval=args.req_interval,
+                    concurrency=args.concurrency,
+                    target_time=args.refresh_time,
                 )
-            # Normal monitoring period: 8:00 - 23:59
-            elif now.hour >= 8:
-                log.info(f"Current time {now:%H:%M:%S}. Starting normal monitoring strategy.")
+
+            # Normal monitoring period: 7:30 - 23:59
+            elif strategy_mode == StrategyMode.NORMAL:
+                log.info(f"Current time [{now:%H:%M:%S}]. Starting normal monitoring strategy.")
                 order_created = await start_normal_monitor(
                     gym=gym,
                     offsets=args.days,
                     max_retries=args.max_retries,
                     req_interval=args.req_interval,
                 )
-            else:
-                # This case should ideally not be reached if logic is correct
-                # but as a fallback, sleep for a bit and re-evaluate
-                log.info(f"Current time {now:%H:%M:%S}. In an unexpected time slot. Sleeping for a short while.")
-                await asyncio.sleep(60)
-                continue
 
-            # If order was created successfully, we can break or continue monitoring
+            # Break the loop if an order was successfully created
             if order_created:
                 break
 
             # Wait before the next check
-            await asyncio.sleep(args.interval)
+            await daemon_sleep(strategy_mode, args.eager_interval, args.interval)
+            continue
 
         except KeyboardInterrupt:
             log.info("Gracefully shutting down ...")
             break
+
         except Exception as e:
             log.exception(f"An error occurred in the daemon:\n{e}")
             await asyncio.sleep(args.interval)
