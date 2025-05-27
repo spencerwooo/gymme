@@ -4,7 +4,6 @@
 >
 > ![image](https://github.com/user-attachments/assets/b5f7ca1d-f3c9-4da4-bdbe-2e53418ed4fa)
 
-
 Use uv to manage this project.
 
 <https://docs.astral.sh/uv/>
