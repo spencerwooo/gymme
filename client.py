@@ -16,8 +16,8 @@ load_dotenv()
 
 TOKEN = os.getenv("TOKEN", "")
 OPEN_ID = os.getenv("OPEN_ID", "")
+SPORT_ID = 51  # Badminton: 51; Tennis: 49
 
-SPORT_ID = 49
 
 @dataclass
 class GymResponse:
@@ -29,8 +29,8 @@ class GymResponse:
     data: dict | list | str | None
 
     @classmethod
-    def from_json(cls, data):
-        return cls(*[data.get(fld.name) for fld in fields(GymResponse)])
+    def from_json(cls, data: dict) -> "GymResponse":
+        return cls(*[data.get(f.name) for f in fields(GymResponse)])
 
 
 @dataclass
@@ -92,7 +92,7 @@ class GymClient:
         data = GymResponse.from_json(data)
         if data.code != 1:
             raise GymRequestError(data.code, data.msg)
-        
+
         if data.data is None:
             return data
         return data.data
@@ -173,8 +173,8 @@ class GymClient:
 
     async def get_prices(self, week: int, day: str) -> dict:
         """
-        Wrapper around #_get_sport_events_price. Should this request fail, get stored
-        prices immediately to fulfill the order at peak hours. Attempt order eagerly.
+        Wrapper around #_get_sport_events_price(). Should this request fail, get
+        persisted prices immediately to fulfill the order at peak hours.
         """
         try:
             prices = await self._get_sport_events_price(week, day)
@@ -190,7 +190,7 @@ class GymClient:
         Return JSON.
         """
         url = "http://gym.dazuiwl.cn/api/order/index?ordertype=makeappointment&status=&orderid=&page=1&limit=20"
-        return await self._create_gym_request(url)
+        return await self._create_gym_request(url, cache=False)
 
     async def check_personal_bookinginfo(self, booking_list=None) -> list[dict]:
         """
@@ -199,29 +199,29 @@ class GymClient:
             - status: str, (e.g., 'paid', 'expired')
             - scene: [{'day': str, 'fields': {field_id: [hour_id, ...], ...}}]
         Example return value:
-        [
-            {'orderid': '20250520185550349313', 'status': 'paid', 'scene': [{'day': '2025-05-21', 'fields': {'224': [328228, 328229]}}]}
-        ]
+        [{'orderid': '20250520185550349313', 'status': 'paid', 'scene': [{'day': '2025-05-21', 'fields': {'224': [328228, 328229]}}]}]
         """
         if booking_list is None:
             raw_json = await self.get_personal_bookinglist()
         else:
             raw_json = booking_list
-        
+
         if not raw_json:
             raise ValueError("No booking information found")
-        
+
         # parse raw_json，get orderid & status & scene
         result = []
         for item in raw_json.get("list", []):
             orderid = item.get("orderid")
             status = item.get("status")
             scene = item["config"].get("scene")
-            result.append({
-                "orderid": orderid,
-                "status": status,
-                "scene": scene,
-            })
+            result.append(
+                {
+                    "orderid": orderid,
+                    "status": status,
+                    "scene": scene,
+                }
+            )
         self.bookinginfo = result
         return result
 
@@ -252,7 +252,7 @@ class GymClient:
                 break
         else:
             return False
-        
+
         return await self.cancel_order_by_id(order_id)
 
     async def create_order(self, week: int, day: str, fields: list[GymField]) -> str:
@@ -278,7 +278,7 @@ class GymClient:
         data = {
             "orderid": "",
             "card_id": "",
-            "sport_events_id": f"{SPORT_ID}",
+            "sport_events_id": SPORT_ID,
             "money": money,
             "ordertype": "makeappointment",
             "paytype": "bitpay",
@@ -321,22 +321,22 @@ class GymClient:
             await self.setup()
 
         day = self.create_relative_date(offset)
-        # price = await self._get_sport_events_price(offset, day)
         schedule_booked = await self.get_sport_schedule_booked(day)
 
         available_fields = []
         for field_id, field_name in self.fields.items():
             for hour_id, hour in self.hours.items():
-                status = schedule_booked.get(f"{field_id}-{hour_id}", -1)
-                if status == 0:
-                    available_fields.append(
-                        GymField(
-                            field_id,
-                            hour_id,
-                            day_type=hour["daytype"],
-                            field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
-                        )
+                # A non-0 schedule status means the field is not bookable
+                if schedule_booked.get(f"{field_id}-{hour_id}", -1) != 0:
+                    continue
+                available_fields.append(
+                    GymField(
+                        field_id,
+                        hour_id,
+                        day_type=hour["daytype"],
+                        field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
                     )
+                )
         return available_fields
 
     @staticmethod
@@ -394,7 +394,7 @@ def show_schedule_table(day: str, schedule_booked: dict, fields: dict, hours: di
 async def test_cancel_order():
     gym = GymClient()
     print(await gym.check_personal_bookinginfo())
-    
+
     # print(await gym.cancel_order_by_id("20250527190804352568"))
 
     offset = 2
@@ -405,7 +405,7 @@ async def test_cancel_order():
     hour_id = 328262
     hour = gym.hours[hour_id]
     field_name = gym.fields[field_id]
-    
+
     field = GymField(
         field_id,
         hour_id,
@@ -417,20 +417,18 @@ async def test_cancel_order():
 
     print(await gym.check_personal_bookinginfo())
 
+
 async def main():
     gym = GymClient()
 
-    # today = 0, tomorrow = 1, day after tomorrow = 2
+    # Offset meanings: today = 0, tomorrow = 1, day after tomorrow = 2
     offset = 1
     day = gym.create_relative_date(offset)
-
-    await gym._setup()
-    schedule_booked = await gym.get_sport_schedule_booked(day)
+    await gym.setup()  # Refresh fields and hours setup
 
     # Print schedule table
     schedule_booked = await gym.get_sport_schedule_booked(day)
     show_schedule_table(day, schedule_booked, gym.fields, gym.hours)
-
 
 
 if __name__ == "__main__":
