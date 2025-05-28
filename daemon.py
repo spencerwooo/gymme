@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 import httpx
@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument("--days", nargs="+", type=int, default=[0], help="Days offset to monitor (e.g., --days 0 1 2)")
     parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests to avoid rate limits")
     parser.add_argument("--interval", type=int, default=600, help="Interval between checks")
-    parser.add_argument("--eager-interval", type=int, default=120, help="Interval for eager checking")
+    parser.add_argument("--eager-interval", type=int, default=60, help="Interval for eager checking")
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent order attempts during eager mode")
     parser.add_argument("--refresh-time", type=str, default="07:00", help="Schedule refresh time (HH:MM format)")
     parser.add_argument("--max-retries", type=int, default=3, help="Retry attempts for server errors")
@@ -57,14 +57,14 @@ def fields_repr(fields: list[list[GymField]] | list[GymField]) -> str:
 
     # Handle single layer list (available fields)
     if isinstance(fields[0], GymField):
-        field_descs = [f.field_desc for f in fields[:3]]
-        suffix = "; ..." if len(fields) > 3 else ""
-        return "; ".join(field_descs) + suffix
+        field_descs = [f.field_desc for f in fields[:8]]  # Cut-off on first 8 fields
+        suffix = ", ..." if len(fields) > 8 else ""
+        return ", ".join(field_descs) + suffix
 
     # Handle list of lists (preferred field scenes)
-    scene_descs = [str([f.field_desc for f in scene]) for scene in fields[:6]]
-    suffix = "; ..." if len(fields) > 6 else ""
-    return "; ".join(scene_descs) + suffix
+    scene_descs = [str([f.field_desc for f in scene]) for scene in fields[:16]]
+    suffix = ", ..." if len(fields) > 16 else ""
+    return ", ".join(scene_descs) + suffix
 
 
 def sc_send(title: str, desp: str = "", sendkey: str = SEND_KEY) -> None:
@@ -136,7 +136,7 @@ async def start_normal_monitor(
     consider_solo_fields: bool = False,
 ) -> bool:
     """Normal monitoring strategy."""
-    days: list[str] = [gym.create_relative_date(offset) for offset in offsets]
+    days = [gym.create_relative_date(offset) for offset in offsets]
     log.info(f"Checking field schedule for days: {days}")
 
     # Loop over each day offset via date
@@ -267,24 +267,28 @@ async def daemon_sleep(
     mode: StrategyMode,
     eager_interval: int,
     normal_interval: int,
-    eager_start: tuple[int, int] = (6, 55),
+    eager_start: str = "06:55",
 ) -> None:
     """Automatically resolve sleep interval based on the current time and strategy mode."""
-    now = datetime.now().time()
-    eager_hour, eager_minute = eager_start
-
     if mode == StrategyMode.HIBERNATE:
-        interval = (eager_hour - now.hour - 1) * 3600
-        interval += (eager_minute - now.minute - 1) * 60 + (60 - now.second)
-        interval %= 24 * 3600
-        if now.hour == eager_hour:  # if current hour is 6, adjust sleep time
-            interval = (eager_minute - now.minute - 1) * 60 + (60 - now.second)
-        if interval <= 0:  # handle edge case if it's exactly 6:55 (eager time) or a bit past
-            interval = 1  # sleep for a short duration and re-evaluate
+        now = datetime.now()
+
+        # Parse target eager start time
+        eager_start_time = datetime.strptime(eager_start, "%H:%M").time()
+        target_datetime = datetime.combine(now.date(), eager_start_time)
+
+        # If current time is past today's eager start, target tomorrow's eager start
+        if now.time() >= eager_start_time:
+            target_datetime += timedelta(days=1)
+
+        interval = int((target_datetime - now).total_seconds())
+
     elif mode == StrategyMode.EAGER:
         interval = eager_interval
+
     elif mode == StrategyMode.NORMAL:
         interval = normal_interval
+
     else:
         interval = 60  # Default fallback interval (1 minute)
 
@@ -341,14 +345,22 @@ async def start_daemon():
             await daemon_sleep(strategy_mode, args.eager_interval, args.interval)
             continue
 
+        # Graceful shutdown on keyboard interrupt
         except KeyboardInterrupt:
             log.info("Gracefully shutting down ...")
             break
 
-        except Exception as e:
-            log.exception(f"An error occurred in the daemon:\n{e}")
-            await asyncio.sleep(args.interval)
+        # Retry on known exceptions and server timeouts
+        except (GymRequestError, GymServerError, httpx.HTTPError) as e:
+            log.error(f"Request failed: {e}. Retrying in {args.req_interval} seconds.")
+            await asyncio.sleep(args.req_interval)
             continue
+
+        # Break on unexpected / unrecoverable errors
+        except Exception as e:
+            log.error("Unexpected error. Exiting daemon.")
+            log.exception(e)
+            break
 
 
 if __name__ == "__main__":
