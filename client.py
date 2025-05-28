@@ -337,17 +337,6 @@ class GymClient:
                         field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
                     )
                 )
-                # A non-0 schedule status means the field is not bookable
-                if schedule_booked.get(f"{field_id}-{hour_id}", -1) != 0:
-                    continue
-                available_fields.append(
-                    GymField(
-                        field_id,
-                        hour_id,
-                        day_type=hour["daytype"],
-                        field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
-                    )
-                )
         return available_fields
 
     @staticmethod
@@ -410,7 +399,7 @@ async def test_cancel_order():
 
     offset = 2
     day = gym.create_relative_date(offset)
-    await gym._setup()
+    await gym.setup()
 
     field_id = "213"
     hour_id = 328262
