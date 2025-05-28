@@ -29,7 +29,7 @@ class GymResponse:
 
     @classmethod
     def from_json(cls, data):
-        return cls(*[data.get(fld.name) for fld in fields(GymResponse)])
+        return cls(*[data.get(f.name) for f in fields(GymResponse)])
 
 
 @dataclass
@@ -245,22 +245,22 @@ class GymClient:
             await self.setup()
 
         day = self.create_relative_date(offset)
-        # price = await self._get_sport_events_price(offset, day)
         schedule_booked = await self.get_sport_schedule_booked(day)
 
         available_fields = []
         for field_id, field_name in self.fields.items():
             for hour_id, hour in self.hours.items():
-                status = schedule_booked.get(f"{field_id}-{hour_id}", -1)
-                if status == 0:
-                    available_fields.append(
-                        GymField(
-                            field_id,
-                            hour_id,
-                            day_type=hour["daytype"],
-                            field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
-                        )
+                # A non-0 schedule status means the field is not bookable
+                if schedule_booked.get(f"{field_id}-{hour_id}", -1) != 0:
+                    continue
+                available_fields.append(
+                    GymField(
+                        field_id,
+                        hour_id,
+                        day_type=hour["daytype"],
+                        field_desc=f"{field_name} ({hour['begin']}-{hour['end']})",
                     )
+                )
         return available_fields
 
     @staticmethod
