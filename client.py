@@ -11,7 +11,13 @@ from rich import box, print
 from rich.table import Table
 
 from config import field_pref_scores, fields_cfg, hour_pref_scores, hours_cfg, prices_cfg
-from errors import GymRequestError, GymServerError
+from errors import (
+    GymFieldOccupiedError,
+    GymOverbookedError,
+    GymRequestError,
+    GymRequestRateLimitedError,
+    GymServerError,
+)
 
 load_dotenv()
 
@@ -79,7 +85,15 @@ class GymClient:
         data = resp.json()
         data = GymResponse.from_json(data)
         if data.code != 1:
-            raise GymRequestError(data.code, data.msg)
+            match data.msg:
+                case "该项目超过每天可预约次数":
+                    raise GymOverbookedError(data.code, data.msg)
+                case "场地该时间段预约中" | "场地该时间段临时有安排":
+                    raise GymFieldOccupiedError(data.code, data.msg)
+                case "请不要频繁提交订单":
+                    raise GymRequestRateLimitedError(data.code, data.msg)
+                case _:
+                    raise GymRequestError(data.code, data.msg)
 
         return data
 
