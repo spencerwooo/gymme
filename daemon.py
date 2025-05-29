@@ -10,7 +10,8 @@ import httpx
 from dotenv import load_dotenv
 from rich.logging import RichHandler
 
-from client import GymClient, GymField, GymRequestError, GymServerError
+from client import GymClient, GymField
+from errors import GymOverbookedError, GymRequestError, GymServerError
 
 load_dotenv()
 SEND_KEY = os.getenv("SEND_KEY", "")
@@ -27,7 +28,7 @@ def parse_args():
     parser.add_argument("--eager-interval", type=int, default=60, help="Interval for eager checking")
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent order attempts during eager mode")
     parser.add_argument("--refresh-time", type=str, default="07:00", help="Schedule refresh time (HH:MM format)")
-    parser.add_argument("--max-retries", type=int, default=3, help="Retry attempts for server errors")
+    parser.add_argument("--max-retries", type=int, default=8, help="Retry attempts for server errors")
     parser.add_argument("--consider-solo-fields", action="store_true", help="Consider solo fields (1 hour)")
     return parser.parse_args()
 
@@ -124,6 +125,42 @@ async def make_order_attempt(
         except Exception as e:
             log.error(f"Unexpected error during order creation: {e}")
             break
+
+    return False
+
+
+async def recover_latest_order(gym: GymClient, max_retries: int, req_interval: int) -> bool:
+    """
+    Manage to get the latest order (orderid) under eager mode when the server is
+    loaded. Return the payment URL and send the notification.
+    """
+    log.info("Server might be loaded. Attempting to retrieve the latest order ...")
+    for i in range(max_retries):
+        try:
+            orders = await gym.get_orders(status="created", limit=1)
+
+            if not orders:
+                log.warning("No orders found. Retrying...")
+                await asyncio.sleep(req_interval)
+                continue
+
+            order_id = orders[0]["orderid"]
+            payment_url = f"http://gym.dazuiwl.cn/h5/#/pages/myBookingDetails/myBookingDetails?id={order_id}"
+            log.info(f"Successfully recovered the latest order to pay. Continue to payment ->\n{payment_url}")
+            sc_send(
+                title="百丽宫羽毛球订单创建成功！",
+                desp=f"订单 **{order_id}** 已创建！\n请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
+            )
+            return True
+
+        except (GymServerError, GymRequestError, httpx.HTTPError) as e:
+            if i < max_retries - 1:
+                log.warning(f"Attempt {i + 1}/{max_retries} failed with: {e}. Retrying...")
+                await asyncio.sleep(req_interval)
+                continue
+            else:
+                log.error(f"Failed to retrieve latest order after {max_retries} attempts: {e}")
+                break
 
     return False
 
@@ -345,16 +382,25 @@ async def start_daemon():
             await daemon_sleep(strategy_mode, args.eager_interval, args.interval)
             continue
 
+        # On eager mode, this suggests that a valid order was created (pushed through),
+        # but the server failed to return the payment URL.
+        except GymOverbookedError as e:
+            log.warning(f"Server may be overloaded: {e}. Attempting to recover latest order ...")
+            order_created = await recover_latest_order(gym, args.max_retries, args.req_interval)
+            if order_created:
+                break
+            raise GymRequestError("Failed to recover latest order after server overload.")
+
+        # Retry on known exceptions and server timeouts
+        except (GymServerError, GymRequestError, httpx.HTTPError) as e:
+            log.error(f"Request failed: {e}. Retrying in {args.req_interval} seconds.")
+            await asyncio.sleep(args.req_interval)
+            continue
+
         # Graceful shutdown on keyboard interrupt
         except KeyboardInterrupt:
             log.info("Gracefully shutting down ...")
             break
-
-        # Retry on known exceptions and server timeouts
-        except (GymRequestError, GymServerError, httpx.HTTPError) as e:
-            log.error(f"Request failed: {e}. Retrying in {args.req_interval} seconds.")
-            await asyncio.sleep(args.req_interval)
-            continue
 
         # Break on unexpected / unrecoverable errors
         except Exception as e:

@@ -11,6 +11,7 @@ from rich import box, print
 from rich.table import Table
 
 from config import field_pref_scores, fields_cfg, hour_pref_scores, hours_cfg, prices_cfg
+from errors import GymRequestError, GymServerError
 
 load_dotenv()
 
@@ -42,18 +43,6 @@ class GymField:
     day_type: str
     field_desc: str
     pref_score: int = 0  # Preference score for sorting, default is 0
-
-
-class GymServerError(Exception):
-    def __init__(self, status_code: int) -> None:
-        super().__init__(f"Server returned error with status code: {status_code}")
-        self.status_code = status_code
-
-
-class GymRequestError(Exception):
-    def __init__(self, code: int, msg: str) -> None:
-        super().__init__(f"Request failed with code {code}: {msg}")
-        self.msg = msg
 
 
 class GymClient:
@@ -163,7 +152,7 @@ class GymClient:
 
     async def _get_personal_orders(self, status: str = "paid", limit: int = 10) -> dict:
         """
-        Get booked orders. `status` must be one of `created`, `paid`, `expired`, `finish`.
+        Get booked orders. `status` must be one of 'created', 'paid', 'expired', 'finish'.
         Return JSON.
         """
         url = "http://gym.dazuiwl.cn/api/order/index"
@@ -197,7 +186,7 @@ class GymClient:
         """
         The return is a list of dicts, each containing:
             - orderid: str
-            - status: str, (e.g., 'paid', 'expired')
+            - status: str, ('created', 'paid', 'expired', 'finish')
             - scene: [{'day': str, 'fields': {field_id: [hour_id, ...], ...}}]
         Example return value:
         [{'orderid': '20250520185550349313', 'status': 'paid', 'scene': [{'day': '2025-05-21', 'fields': {'224': [328228, 328229]}}]}]
