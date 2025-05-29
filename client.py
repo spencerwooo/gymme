@@ -78,7 +78,6 @@ class GymClient:
         self.client = hishel.AsyncCacheClient(headers=self.headers)
         self.fields = None
         self.hours = None
-        self.bookinginfo = None
 
     @staticmethod
     def create_relative_date(offset: int = 0) -> str:
@@ -162,6 +161,16 @@ class GymClient:
         resp = await self._create_gym_request(url, params=params)
         return resp.data
 
+    async def _get_personal_orders(self, status: str = "paid", limit: int = 10) -> dict:
+        """
+        Get booked orders. `status` must be one of `created`, `paid`, `expired`, `finish`.
+        Return JSON.
+        """
+        url = "http://gym.dazuiwl.cn/api/order/index"
+        params = {"ordertype": "makeappointment", "status": status, "orderid": "", "page": 1, "limit": limit}
+        resp = await self._create_gym_request(url, params=params, cache=False)
+        return resp.data
+
     async def get_sport_schedule_booked(self, day: str) -> dict:
         """
         Schedule: {'<field_id>-<hour_id>': <status_id>, ...}
@@ -184,16 +193,7 @@ class GymClient:
             prices = prices_cfg["weekend" if datetime.strptime(day, "%Y-%m-%d").weekday() >= 5 else "weekday"]
         return prices
 
-    async def get_personal_bookinglist(self) -> dict:
-        """
-        Get the personal booking list.
-        Return JSON.
-        """
-        url = "http://gym.dazuiwl.cn/api/order/index?ordertype=makeappointment&status=paid&orderid=&page=1&limit=20"
-        resp = await self._create_gym_request(url, cache=False)
-        return resp.data
-
-    async def check_personal_bookinginfo(self, booking_list=None) -> list[dict]:
+    async def get_orders(self, status: str = "paid", limit: int = 10) -> list[dict]:
         """
         The return is a list of dicts, each containing:
             - orderid: str
@@ -202,29 +202,15 @@ class GymClient:
         Example return value:
         [{'orderid': '20250520185550349313', 'status': 'paid', 'scene': [{'day': '2025-05-21', 'fields': {'224': [328228, 328229]}}]}]
         """
-        if booking_list is None:
-            raw_json = await self.get_personal_bookinglist()
-        else:
-            raw_json = booking_list
-
-        if not raw_json:
-            raise ValueError("No booking information found")
-
-        # parse raw_json，get orderid & status & scene
-        result = []
-        for item in raw_json.get("list", []):
-            orderid = item.get("orderid")
-            status = item.get("status")
-            scene = item["config"].get("scene")
-            result.append(
-                {
-                    "orderid": orderid,
-                    "status": status,
-                    "scene": scene,
-                }
-            )
-        self.bookinginfo = result
-        return result
+        orders = await self._get_personal_orders(status, limit)
+        return [
+            {
+                "orderid": item["orderid"],
+                "status": item["status"],
+                "scene": item["config"]["scene"],
+            }
+            for item in orders["list"]
+        ]
 
     async def cancel_order_by_id(self, order_id: str) -> bool:
         """
@@ -232,7 +218,7 @@ class GymClient:
         Returns True if successful, False otherwise.
         """
         url = f"http://gym.dazuiwl.cn/api/order/cancel/orderid/{order_id}"
-        resp = await self._create_gym_request(url, method="PUT")
+        resp = await self._create_gym_request(url, method="PUT", cache=False)
         return resp.code == 1
 
     async def cancel_order_by_field(self, field: GymField, day: str) -> bool:
@@ -240,16 +226,15 @@ class GymClient:
         Cancel an order by GymField.
         Returns True if successful, False otherwise.
         """
-        if not self.bookinginfo:
-            await self.check_personal_bookinginfo()
+        orders = await self.get_orders()
 
-        for booking in self.bookinginfo:
-            booking_day = booking["scene"][0]["day"]
-            booking_hours = booking["scene"][0]["fields"].get(field.field_id, [])
-            if not booking_hours:
+        for order in orders:
+            order_day = order["scene"][0]["day"]
+            order_hours = order["scene"][0]["fields"].get(field.field_id, [])
+            if not order_hours:
                 continue
-            if field.hour_id in booking_hours and booking_day == day:
-                order_id = booking["orderid"]
+            if field.hour_id in order_hours and order_day == day:
+                order_id = order["orderid"]
                 break
         else:
             return False
@@ -394,7 +379,7 @@ def show_schedule_table(day: str, schedule_booked: dict, fields: dict, hours: di
 
 async def test_cancel_order():
     gym = GymClient()
-    print(await gym.check_personal_bookinginfo())
+    print(await gym.get_orders())
 
     # print(await gym.cancel_order_by_id("20250527190804352568"))
 
@@ -415,8 +400,7 @@ async def test_cancel_order():
     )
 
     print(await gym.cancel_order_by_field(field, day))
-
-    print(await gym.check_personal_bookinginfo())
+    print(await gym.get_orders())
 
 
 async def main():
