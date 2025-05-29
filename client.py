@@ -16,7 +16,7 @@ load_dotenv()
 
 TOKEN = os.getenv("TOKEN", "")
 OPEN_ID = os.getenv("OPEN_ID", "")
-SPORT_ID = 51  # Badminton: 51; Tennis: 49
+SPORT_ID = 51  # Badminton: 51; Table tennis: 49
 
 
 @dataclass
@@ -85,7 +85,7 @@ class GymClient:
         return (datetime.now() + timedelta(days=offset)).strftime("%Y-%m-%d")
 
     @staticmethod
-    async def parse_json_resp(resp: httpx.Response) -> dict | list | str | None:
+    async def parse_json_resp(resp: httpx.Response) -> GymResponse:
         if resp.status_code != 200:
             raise GymServerError(resp.status_code)
         data = resp.json()
@@ -93,9 +93,7 @@ class GymClient:
         if data.code != 1:
             raise GymRequestError(data.code, data.msg)
 
-        if data.data is None:
-            return data
-        return data.data
+        return data
 
     async def setup(self) -> None:
         """Initial setup to fetch fields and hours."""
@@ -130,8 +128,8 @@ class GymClient:
         Field names: [主馆1, 主馆2, 主馆3, 主馆4, 主馆5, 主馆6, 主馆7, 主馆8, 副馆9, 副馆10, 副馆11, 副馆12]
         """
         url = f"http://gym.dazuiwl.cn/api/sport_events/field/id/{SPORT_ID}"
-        data = await self._create_gym_request(url)
-        return {k: v["name"] for k, v in data.items()}
+        resp = await self._create_gym_request(url)
+        return {k: v["name"] for k, v in resp.data.items()}
 
     async def _get_sport_events_hour(self) -> dict:
         """
@@ -142,7 +140,7 @@ class GymClient:
         Day types: [morning, day, night]
         """
         url = f"http://gym.dazuiwl.cn/api/sport_events/hour/id/{SPORT_ID}"
-        data = await self._create_gym_request(url)
+        resp = await self._create_gym_request(url)
         return {
             d["id"]: {
                 "begin": d["begintime_text"],
@@ -150,7 +148,7 @@ class GymClient:
                 "create": d["createtime"],
                 "daytype": d["daytype"],
             }
-            for d in data
+            for d in resp.data
         }
 
     async def _get_sport_events_price(self, week: int, day: str) -> dict:
@@ -161,7 +159,8 @@ class GymClient:
         """
         url = f"http://gym.dazuiwl.cn/api/sport_events/price/id/{SPORT_ID}"
         params = {"week": week, "day": day}
-        return await self._create_gym_request(url, params=params)
+        resp = await self._create_gym_request(url, params=params)
+        return resp.data
 
     async def get_sport_schedule_booked(self, day: str) -> dict:
         """
@@ -169,7 +168,8 @@ class GymClient:
         Status: 0 - available, others - booked
         """
         url = f"http://gym.dazuiwl.cn/api/sport_schedule/booked/id/{SPORT_ID}"
-        return await self._create_gym_request(url, params={"day": day}, cache=False)
+        resp = await self._create_gym_request(url, params={"day": day}, cache=False)
+        return resp.data
 
     async def get_prices(self, week: int, day: str) -> dict:
         """
@@ -189,8 +189,9 @@ class GymClient:
         Get the personal booking list.
         Return JSON.
         """
-        url = "http://gym.dazuiwl.cn/api/order/index?ordertype=makeappointment&status=&orderid=&page=1&limit=20"
-        return await self._create_gym_request(url, cache=False)
+        url = "http://gym.dazuiwl.cn/api/order/index?ordertype=makeappointment&status=paid&orderid=&page=1&limit=20"
+        resp = await self._create_gym_request(url, cache=False)
+        return resp.data
 
     async def check_personal_bookinginfo(self, booking_list=None) -> list[dict]:
         """
@@ -308,7 +309,7 @@ class GymClient:
         # <script>document.forms['wechatsubmit'].submit();</script>
 
         # Parse trade number from response and construct redirect URL for payment
-        pattern = re.search(r"name='tenantTradeNumber' value='([^']+)'", resp)
+        pattern = re.search(r"name='tenantTradeNumber' value='([^']+)'", resp.data)
         if pattern:
             trade_number = pattern.group(1)
             return f"http://gym.dazuiwl.cn/h5/#/pages/myBookingDetails/myBookingDetails?id={trade_number}"
