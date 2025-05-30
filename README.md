@@ -1,8 +1,6 @@
 **`gymy`**
 
 > 百丽宫中关村羽毛球捡漏王
->
-> ![image](https://github.com/user-attachments/assets/b5f7ca1d-f3c9-4da4-bdbe-2e53418ed4fa)
 
 Use uv to manage this project.
 
@@ -26,4 +24,31 @@ Finally, start daemon.
 
 ```bash
 uv run daemon.py
+```
+
+Available command line options:
+
+```console
+$ uv run daemon.py --help
+usage: daemon.py [-h] [--days DAYS [DAYS ...]] [--req-interval REQ_INTERVAL] [--interval INTERVAL] [--eager-interval EAGER_INTERVAL] [--concurrency CONCURRENCY] [--refresh-time REFRESH_TIME] [--max-retries MAX_RETRIES] [--consider-solo-fields]
+
+gymy daemon -- 百丽宫中关村羽毛球捡漏王已开启！
+
+options:
+  -h, --help            show this help message and exit
+  --days DAYS [DAYS ...]
+                        Days offset to monitor (e.g., --days 0 1 2)
+  --req-interval REQ_INTERVAL
+                        Interval between requests to avoid rate limits
+  --interval INTERVAL   Interval between checks
+  --eager-interval EAGER_INTERVAL
+                        Interval for eager checking
+  --concurrency CONCURRENCY
+                        Concurrent order attempts during eager mode
+  --refresh-time REFRESH_TIME
+                        Schedule refresh time (HH:MM format)
+  --max-retries MAX_RETRIES
+                        Retry attempts for server errors
+  --consider-solo-fields
+                        Consider solo fields (1 hour)
 ```
