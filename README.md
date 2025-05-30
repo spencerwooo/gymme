@@ -2,6 +2,8 @@
 
 > 百丽宫中关村羽毛球捡漏王
 
+![screenshot](https://github.com/user-attachments/assets/d4b627e9-4c28-45cd-9fe2-eaa275ceab56)
+
 Use uv to manage this project.
 
 <https://docs.astral.sh/uv/>
