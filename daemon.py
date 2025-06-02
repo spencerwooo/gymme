@@ -85,6 +85,26 @@ def sc_send(title: str, desp: str = "", sendkey: str = SEND_KEY) -> None:
     log.info(f"Notification server response: {resp.json()}")
 
 
+async def request_with_retry(request_fn, max_retries: int, req_interval: float = None):
+    for i in range(max_retries):
+        try:
+            return await request_fn()
+        except GymRequestRateLimitedError as e:
+            if i < max_retries - 1:
+                delay = req_interval or 0.5
+                log.warning(f"Rate limited: {e}. Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+                continue
+            raise
+        except (GymRequestError, GymServerError, httpx.HTTPError) as e:
+            if i < max_retries - 1:
+                log.warning(f"Attempt {i + 1}/{max_retries} failed: {e}. Retrying immediately...")
+                await asyncio.sleep(0.5)  # Short delay before retrying
+                continue
+            raise
+    raise Exception(f"Request failed after {max_retries} attempts")
+
+
 async def make_order_attempt(
     gym: GymClient,
     offset: int,
@@ -96,49 +116,29 @@ async def make_order_attempt(
     order_attempt_details = f"{day} {[f.field_desc for f in field]}"
     log.info(f"Attempting to create order for {order_attempt_details} ...")
 
-    for i in range(max_retries):
-        try:
-            payment_url = await gym.create_order(offset, day, field)
-            log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
-            sc_send(
-                title="百丽宫羽毛球订单创建成功！",
-                desp=f"订单 **{order_attempt_details}** 已创建！\n"
-                f"请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
-            )
-            return True
+    async def _make_order_fn():
+        return await gym.create_order(offset, day, field)
 
-        # On eager mode, this suggests that a valid order was created (pushed through),
-        # but the server failed to return the payment URL; For normal mode, this
-        # indicates that the user reached the maximum number of fields bookable for a
-        # single day -- which is 2 fields.
-        except GymOverbookedError as e:
-            log.warning(f"Attempting to recover latest order: {e}.")
-            return await recover_latest_order(gym)
+    try:
+        payment_url = await request_with_retry(_make_order_fn, max_retries, req_interval)
 
-        # Retry on known exceptions, server errors and server timeouts
-        except (GymRequestError, GymServerError, httpx.HTTPError) as e:
-            if i < max_retries - 1:
-                retry_interval = req_interval if isinstance(e, GymRequestRateLimitedError) else 0.5
-                log.warning(f"Attempt {i + 1}/{max_retries} failed: {e}. Retrying in {retry_interval} seconds.")
-                await asyncio.sleep(retry_interval)
-                continue
-            else:
-                log.error(f"Failed to create order after {max_retries} attempts: {e}")
-                break
+        log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
+        sc_send(
+            title="百丽宫羽毛球订单创建成功！",
+            desp=f"订单 **{order_attempt_details}** 已创建！\n请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
+        )
+        return True
 
-        # Catch all other unexpected exceptions and break out of the retry loop
-        except Exception as e:
-            log.error(f"Unexpected error during order creation: {e}")
-            break
+    except GymOverbookedError as e:
+        log.warning(f"Attempting to recover latest order: {e}.")
+        return await recover_latest_order(gym)
 
-    return False
+    except Exception as e:
+        log.error(f"Failed to create order for {order_attempt_details}: {e}")
+        return False
 
 
 async def recover_latest_order(gym: GymClient) -> bool:
-    """
-    Manage to get the latest order (orderid) under eager mode when the server is
-    loaded. Return the payment URL and send the notification.
-    """
     orders = await gym.get_orders(status="created", limit=1)
 
     if not orders:
@@ -331,16 +331,16 @@ async def start_daemon():
     log.info(banner_repr())
 
     while True:
+        # Resolve strategy mode based on current time first
+        now = datetime.now().time()
+        strategy = StrategyMode.from_time(now)
+
+        # Only setup connection if not hibernating to avoid unnecessary requests
+        if strategy != StrategyMode.HIBERNATE:
+            await gym.setup()
+
+        order_created = False
         try:
-            # Resolve strategy mode based on current time first
-            now = datetime.now().time()
-            strategy = StrategyMode.from_time(now)
-
-            # Only setup connection if not hibernating to avoid unnecessary requests
-            if strategy != StrategyMode.HIBERNATE:
-                await gym.setup()
-
-            order_created = False
             match strategy:
                 # Hibernate period: 0:00 - 6:54
                 case StrategyMode.HIBERNATE:
@@ -372,21 +372,19 @@ async def start_daemon():
             if order_created:
                 break
 
-            # Wait before the next check
-            await daemon_sleep(strategy, args.eager_interval, args.interval)
-            continue
-
-        # Retry on known exceptions, server errors and server timeouts
         except (GymRequestError, GymServerError, httpx.HTTPError) as e:
             retry_interval = args.req_interval if isinstance(e, GymRequestRateLimitedError) else 0.5
-            log.error(f"Request failed: {e}. Retrying in {retry_interval} seconds.")
+            log.error(f"Strategy execution failed: {e}. Retrying in {retry_interval} seconds.")
             await asyncio.sleep(retry_interval)
             continue
 
-        # Break on unexpected / unrecoverable errors
         except Exception as e:
-            log.exception(e)
-            break
+            log.exception(f"Unexpected error in daemon loop: {e}")
+            await asyncio.sleep(args.req_interval)
+            continue
+
+        # Wait before the next check
+        await daemon_sleep(strategy, args.eager_interval, args.interval)
 
 
 if __name__ == "__main__":
