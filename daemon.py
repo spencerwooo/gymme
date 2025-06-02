@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from rich.logging import RichHandler
 
 from client import GymClient, GymField
-from errors import GymOverbookedError, GymRequestError, GymServerError
+from errors import GymOverbookedError, GymRequestError, GymRequestRateLimitedError, GymServerError
 
 load_dotenv()
 SEND_KEY = os.getenv("SEND_KEY", "")
@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument("--eager-interval", type=int, default=60, help="Interval for eager checking")
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent order attempts during eager mode")
     parser.add_argument("--refresh-time", type=str, default="07:00", help="Schedule refresh time (HH:MM format)")
-    parser.add_argument("--max-retries", type=int, default=8, help="Retry attempts for server errors")
+    parser.add_argument("--max-retries", type=int, default=5, help="Retry attempts for server errors")
     parser.add_argument("--consider-solo-fields", action="store_true", help="Consider solo fields (1 hour)")
     return parser.parse_args()
 
@@ -107,18 +107,23 @@ async def make_order_attempt(
             )
             return True
 
-        # For known exceptions, make full use of retries
-        except (GymServerError, GymRequestError, httpx.HTTPError) as e:
+        # On eager mode, this suggests that a valid order was created (pushed through),
+        # but the server failed to return the payment URL; For normal mode, this
+        # indicates that the user reached the maximum number of fields bookable for a
+        # single day -- which is 2 fields.
+        except GymOverbookedError as e:
+            log.warning(f"Attempting to recover latest order: {e}.")
+            return await recover_latest_order(gym)
+
+        # Retry on known exceptions, server errors and server timeouts
+        except (GymRequestError, GymServerError, httpx.HTTPError) as e:
             if i < max_retries - 1:
-                log.warning(f"Attempt {i + 1}/{max_retries} failed with: {e}. Retrying...")
-                await asyncio.sleep(req_interval if isinstance(e, GymRequestError) else 0.5)
+                retry_interval = req_interval if isinstance(e, GymRequestRateLimitedError) else 0.5
+                log.warning(f"Attempt {i + 1}/{max_retries} failed: {e}. Retrying in {retry_interval} seconds.")
+                await asyncio.sleep(retry_interval)
                 continue
             else:
                 log.error(f"Failed to create order after {max_retries} attempts: {e}")
-                # sc_send(
-                #     title="百丽宫羽毛球订单创建失败",
-                #     desp=f"订单 **{order_attempt_details}** 创建失败：\n\n> {e}",
-                # )
                 break
 
         # Catch all other unexpected exceptions and break out of the retry loop
@@ -129,39 +134,25 @@ async def make_order_attempt(
     return False
 
 
-async def recover_latest_order(gym: GymClient, max_retries: int, interval: int) -> bool:
+async def recover_latest_order(gym: GymClient) -> bool:
     """
     Manage to get the latest order (orderid) under eager mode when the server is
     loaded. Return the payment URL and send the notification.
     """
-    for i in range(max_retries):
-        try:
-            orders = await gym.get_orders(status="created", limit=1)
+    orders = await gym.get_orders(status="created", limit=1)
 
-            if not orders:
-                log.warning("No orders found. Retrying...")
-                await asyncio.sleep(interval)
-                continue
+    if not orders:
+        log.error("No created orders found. Unable to recover latest order.")
+        return False
 
-            order_id = orders[0]["orderid"]
-            payment_url = f"http://gym.dazuiwl.cn/h5/#/pages/myBookingDetails/myBookingDetails?id={order_id}"
-            log.info(f"Successfully recovered order ({order_id}). Continue to payment ->\n{payment_url}")
-            sc_send(
-                title="百丽宫羽毛球订单创建成功！",
-                desp=f"订单 **{order_id}** 已创建！\n请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
-            )
-            return True
-
-        except (GymServerError, GymRequestError, httpx.HTTPError) as e:
-            if i < max_retries - 1:
-                log.warning(f"Attempt {i + 1}/{max_retries} failed with: {e}. Retrying...")
-                await asyncio.sleep(interval)
-                continue
-            else:
-                log.error(f"Failed to retrieve latest order after {max_retries} attempts: {e}")
-                break
-
-    return False
+    order_id = orders[0]["orderid"]
+    payment_url = f"http://gym.dazuiwl.cn/h5/#/pages/myBookingDetails/myBookingDetails?id={order_id}"
+    log.info(f"Successfully recovered order ({order_id}). Continue to payment ->\n{payment_url}")
+    sc_send(
+        title="百丽宫羽毛球订单创建成功！",
+        desp=f"订单 **{order_id}** 已创建！\n请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
+    )
+    return True
 
 
 async def start_normal_monitor(
@@ -207,7 +198,7 @@ async def start_normal_monitor(
     return False
 
 
-async def start_eager_order(
+async def start_eager_monitor(
     gym: GymClient,
     max_retries: int,
     req_interval: int,
@@ -358,7 +349,7 @@ async def start_daemon():
                 # Eager ordering period: 6:55 - 7:29
                 case StrategyMode.EAGER:
                     log.info(f"Current time [{now:%H:%M:%S}]. Starting eager ordering strategy.")
-                    order_created = await start_eager_order(
+                    order_created = await start_eager_monitor(
                         gym=gym,
                         max_retries=args.max_retries,
                         req_interval=args.req_interval,
@@ -385,24 +376,15 @@ async def start_daemon():
             await daemon_sleep(strategy, args.eager_interval, args.interval)
             continue
 
-        # On eager mode, this suggests that a valid order was created (pushed through),
-        # but the server failed to return the payment URL.
-        except GymOverbookedError as e:
-            log.warning(f"Attempting to recover latest order: {e}.")
-            order_created = await recover_latest_order(gym, args.max_retries, args.eager_interval)
-            if order_created:
-                break
-            raise GymRequestError("Failed to recover latest order.")
-
-        # Retry on known exceptions and server timeouts
-        except (GymServerError, GymRequestError, httpx.HTTPError) as e:
-            log.error(f"Request failed: {e}. Retrying in {args.req_interval} seconds.")
-            await asyncio.sleep(args.req_interval)
+        # Retry on known exceptions, server errors and server timeouts
+        except (GymRequestError, GymServerError, httpx.HTTPError) as e:
+            retry_interval = args.req_interval if isinstance(e, GymRequestRateLimitedError) else 0.5
+            log.error(f"Request failed: {e}. Retrying in {retry_interval} seconds.")
+            await asyncio.sleep(retry_interval)
             continue
 
         # Break on unexpected / unrecoverable errors
         except Exception as e:
-            log.error("Unexpected error. Exiting daemon.")
             log.exception(e)
             break
 
