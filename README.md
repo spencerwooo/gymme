@@ -1,6 +1,6 @@
-**`gymy`**
+**`gymme`**
 
-> 百丽宫中关村羽毛球捡漏王
+> /ˈɡɪmi/ -- 百丽宫中关村羽毛球捡漏王
 
 ![screenshot](https://github.com/user-attachments/assets/d4b627e9-4c28-45cd-9fe2-eaa275ceab56)
 
@@ -34,7 +34,7 @@ Available command line options:
 $ uv run daemon.py --help
 usage: daemon.py [-h] [--days DAYS [DAYS ...]] [--req-interval REQ_INTERVAL] [--interval INTERVAL] [--eager-interval EAGER_INTERVAL] [--concurrency CONCURRENCY] [--refresh-time REFRESH_TIME] [--max-retries MAX_RETRIES] [--consider-solo-fields]
 
-gymy daemon -- 百丽宫中关村羽毛球捡漏王已开启！
+gymme daemon -- 百丽宫中关村羽毛球捡漏王已开启！
 
 options:
   -h, --help            show this help message and exit

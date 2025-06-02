@@ -21,7 +21,7 @@ log = logging.getLogger("rich")
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="gymy daemon -- 百丽宫中关村羽毛球捡漏王已开启！")
+    parser = argparse.ArgumentParser(description="gymme daemon -- 百丽宫中关村羽毛球捡漏王已开启！")
     parser.add_argument("--days", nargs="+", type=int, default=[0], help="Days offset to monitor (e.g., --days 0 1 2)")
     parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests to avoid rate limits")
     parser.add_argument("--interval", type=int, default=600, help="Interval between checks")
@@ -34,21 +34,21 @@ def parse_args():
 
 
 def banner_repr() -> str:
-    return (
-        "\n"
-        "      ___           ___           ___           ___     \n"
-        "     /\\  \\         |\\__\\         /\\__\\         |\\__\\    \n"
-        "    /::\\  \\        |:|  |       /::|  |        |:|  |   \n"
-        "   /:/\\:\\  \\       |:|  |      /:|:|  |        |:|  |   \n"
-        "  /:/  \\:\\  \\      |:|__|__   /:/|:|__|__      |:|__|__ \n"
-        " /:/__/_\\:\\__\\     /::::\\__\\ /:/ |::::\\__\\     /::::\\__\\\n"
-        " \\:\\  /\\ \\/__/    /:/~~/~    \\/__/~~/:/  /    /:/~~/~   \n"
-        "  \\:\\ \\:\\__\\     /:/  /            /:/  /    /:/  /     \n"
-        "   \\:\\/:/  /     \\/__/            /:/  /     \\/__/      \n"
-        "    \\::/  /                      /:/  /                 \n"
-        "     \\/__/                       \\/__/                  \n"
-        "\n"
-    )
+    return """
+
+      ___       ___          ___          ___          ___     
+     /\\  \\     |\\__\\        /\\__\\        /\\__\\        /\\  \\    
+    /::\\  \\    |:|  |      /::|  |      /::|  |      /::\\  \\   
+   /:/\\:\\  \\   |:|  |     /:|:|  |     /:|:|  |     /:/\\:\\  \\  
+  /:/  \\:\\  \\  |:|__|__  /:/|:|__|__  /:/|:|__|__  /::\\~\\:\\  \\ 
+ /:/__/_\\:\\__\\ /::::\\__\\/:/ |::::\\__\\/:/ |::::\\__\\/:/\\:\\ \\:\\__\\
+ \\:\\  /\\ \\/__//:/~~/~   \\/__/~~/:/  /\\/__/~~/:/  /\\:\\~\\:\\ \\/__/
+  \\:\\ \\:\\__\\ /:/  /           /:/  /       /:/  /  \\:\\ \\:\\__\\  
+   \\:\\/:/  / \\/__/           /:/  /       /:/  /    \\:\\ \\/__/  
+    \\::/  /                 /:/  /       /:/  /      \\:\\__\\    
+     \\/__/                  \\/__/        \\/__/        \\/__/    
+
+"""
 
 
 def fields_repr(fields: list[list[GymField]] | list[GymField]) -> str:
