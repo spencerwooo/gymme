@@ -10,8 +10,14 @@ from dotenv import load_dotenv
 from rich import box, print
 from rich.table import Table
 
-from config import field_pref_scores, fields_cfg, hour_pref_scores, hours_cfg, prices_cfg
-from errors import (
+from gymme.config import (
+    field_pref_scores,
+    fields_cfg,
+    hour_pref_scores,
+    hours_cfg,
+    prices_cfg,
+)
+from gymme.errors import (
     GymFieldOccupiedError,
     GymOverbookedError,
     GymRequestError,

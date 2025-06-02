@@ -10,8 +10,8 @@ import httpx
 from dotenv import load_dotenv
 from rich.logging import RichHandler
 
-from client import GymClient, GymField
-from errors import GymOverbookedError, GymRequestError, GymRequestRateLimitedError, GymServerError
+from gymme.client import GymClient, GymField
+from gymme.errors import GymOverbookedError, GymRequestError, GymRequestRateLimitedError, GymServerError
 
 load_dotenv()
 SEND_KEY = os.getenv("SEND_KEY", "")

@@ -1,6 +1,6 @@
 **`gymme`**
 
-> /ˈɡɪmi/ -- 百丽宫中关村羽毛球捡漏王
+> /ˈɡɪmi/ (gymme == gimme!) -- 百丽宫中关村羽毛球捡漏王
 
 ![screenshot](https://github.com/user-attachments/assets/d4b627e9-4c28-45cd-9fe2-eaa275ceab56)
 
@@ -25,13 +25,13 @@ uv sync
 Finally, start daemon.
 
 ```bash
-uv run daemon.py
+uv run gymme/daemon.py
 ```
 
 Available command line options:
 
 ```console
-$ uv run daemon.py --help
+$ uv run gymme/daemon.py --help
 usage: daemon.py [-h] [--days DAYS [DAYS ...]] [--req-interval REQ_INTERVAL] [--interval INTERVAL] [--eager-interval EAGER_INTERVAL] [--concurrency CONCURRENCY] [--refresh-time REFRESH_TIME] [--max-retries MAX_RETRIES] [--consider-solo-fields]
 
 gymme daemon -- 百丽宫中关村羽毛球捡漏王已开启！
