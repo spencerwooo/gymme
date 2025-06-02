@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import urllib.parse
@@ -24,12 +25,6 @@ from gymme.errors import (
     GymRequestRateLimitedError,
     GymServerError,
 )
-
-load_dotenv()
-
-TOKEN = os.getenv("TOKEN", "")
-OPEN_ID = os.getenv("OPEN_ID", "")
-SPORT_ID = 51  # Badminton: 51; Table tennis: 49
 
 
 @dataclass
@@ -58,14 +53,16 @@ class GymField:
 
 
 class GymClient:
-    def __init__(self) -> None:
-        self.token = TOKEN
-        self.open_id = OPEN_ID
+    def __init__(self, token: str, open_id: str, sport_id: int = 51) -> None:
+        self.log = logging.getLogger(__name__)
+        self.token = token
+        self.open_id = open_id
+        self.sport_id = sport_id  # Badminton: 51; Table tennis: 49
         self.headers = {
             "Host": "gym.dazuiwl.cn",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36 "
-            "NetType/WIFI MicroMessenger/6.8.0(0x16080000) MacWechat/3.8.10(0x13080a11) XWEB/1227 Flue",
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 "
+            "MicroMessenger/8.0.59(0x18003b2c) NetType/WIFI Language/zh_CN",
             "token": self.token,
             "X-Requested-With": "XMLHttpRequest",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -112,7 +109,7 @@ class GymClient:
             self.hours = hours
         except Exception:
             # During peak hours, the server will fail to respond. Use hard-coded values if setup fails.
-            print("Setup failed as server is overloaded, falling back to hard-coded values.")
+            self.log.warning("Setup failed as server is overloaded, falling back to hard-coded values.")
         if self.fields is None:
             self.fields = fields_cfg
         if self.hours is None:
@@ -135,7 +132,7 @@ class GymClient:
         Field ids: [220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231]
         Field names: [主馆1, 主馆2, 主馆3, 主馆4, 主馆5, 主馆6, 主馆7, 主馆8, 副馆9, 副馆10, 副馆11, 副馆12]
         """
-        url = f"http://gym.dazuiwl.cn/api/sport_events/field/id/{SPORT_ID}"
+        url = f"http://gym.dazuiwl.cn/api/sport_events/field/id/{self.sport_id}"
         resp = await self._create_gym_request(url)
         return {k: v["name"] for k, v in resp.data.items()}
 
@@ -147,7 +144,7 @@ class GymClient:
                     16-17, 17-18, 18-19, 19-20, 20-21, 21-22]
         Day types: [morning, day, night]
         """
-        url = f"http://gym.dazuiwl.cn/api/sport_events/hour/id/{SPORT_ID}"
+        url = f"http://gym.dazuiwl.cn/api/sport_events/hour/id/{self.sport_id}"
         resp = await self._create_gym_request(url)
         return {
             d["id"]: {
@@ -165,7 +162,7 @@ class GymClient:
         Price (on weekdays): 10, 20, 50
         Price (on weekends): 20, 50, 50
         """
-        url = f"http://gym.dazuiwl.cn/api/sport_events/price/id/{SPORT_ID}"
+        url = f"http://gym.dazuiwl.cn/api/sport_events/price/id/{self.sport_id}"
         params = {"week": week, "day": day}
         resp = await self._create_gym_request(url, params=params)
         return resp.data
@@ -185,7 +182,7 @@ class GymClient:
         Schedule: {'<field_id>-<hour_id>': <status_id>, ...}
         Status: 0 - available, others - booked
         """
-        url = f"http://gym.dazuiwl.cn/api/sport_schedule/booked/id/{SPORT_ID}"
+        url = f"http://gym.dazuiwl.cn/api/sport_schedule/booked/id/{self.sport_id}"
         resp = await self._create_gym_request(url, params={"day": day}, cache=False)
         return resp.data
 
@@ -197,7 +194,7 @@ class GymClient:
         try:
             prices = await self._get_sport_events_price(week, day)
         except Exception:
-            print("Prices are not available as server is overloaded, falling back to hard-coded values.")
+            self.log.warning("Prices are not available as server is overloaded, falling back to hard-coded values.")
             # Only difference is weekend v.s. weekday prices, perform check to see if target date is weekend
             prices = prices_cfg["weekend" if datetime.strptime(day, "%Y-%m-%d").weekday() >= 5 else "weekday"]
         return prices
@@ -273,12 +270,12 @@ class GymClient:
         data = {
             "orderid": "",
             "card_id": "",
-            "sport_events_id": SPORT_ID,
+            "sport_events_id": self.sport_id,
             "money": money,
             "ordertype": "makeappointment",
             "paytype": "bitpay",
             "scene": scene,
-            "openid": OPEN_ID,
+            "openid": self.open_id,
         }
         # Encode for legacy PHP compatibility
         data = urllib.parse.urlencode(data, quote_via=urllib.parse.quote, safe="", encoding="utf-8")
@@ -387,7 +384,10 @@ def show_schedule_table(day: str, schedule_booked: dict, fields: dict, hours: di
 
 
 async def test_cancel_order():
-    gym = GymClient()
+    load_dotenv()
+    token = os.getenv("TOKEN", "")
+    open_id = os.getenv("OPEN_ID", "")
+    gym = GymClient(token, open_id)
     print(await gym.get_orders())
 
     # print(await gym.cancel_order_by_id("20250527190804352568"))
@@ -413,7 +413,10 @@ async def test_cancel_order():
 
 
 async def main():
-    gym = GymClient()
+    load_dotenv()
+    token = os.getenv("TOKEN", "")
+    open_id = os.getenv("OPEN_ID", "")
+    gym = GymClient(token, open_id)
 
     # Offset meanings: today = 0, tomorrow = 1, day after tomorrow = 2
     offset = 1

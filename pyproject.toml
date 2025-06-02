@@ -14,9 +14,6 @@ dependencies = [
     "setuptools>=80.9.0",
 ]
 
-[project.scripts]
-gymme = "gymme.daemon:main"
-
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
