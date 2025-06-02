@@ -25,14 +25,14 @@ uv sync
 Finally, start daemon.
 
 ```bash
-uv run gymme/daemon.py
+uv run gymme
 ```
 
 Available command line options:
 
 ```console
-$ uv run gymme/daemon.py --help
-usage: daemon.py [-h] [--days DAYS [DAYS ...]] [--req-interval REQ_INTERVAL] [--interval INTERVAL] [--eager-interval EAGER_INTERVAL] [--concurrency CONCURRENCY] [--refresh-time REFRESH_TIME] [--max-retries MAX_RETRIES] [--consider-solo-fields]
+$ uv run gymme --help
+usage: gymme [-h] [--days DAYS [DAYS ...]] [--req-interval REQ_INTERVAL] [--interval INTERVAL] [--eager-interval EAGER_INTERVAL] [--concurrency CONCURRENCY] [--refresh-time REFRESH_TIME] [--max-retries MAX_RETRIES] [--consider-solo-fields]
 
 gymme daemon -- 百丽宫中关村羽毛球捡漏王已开启！
 

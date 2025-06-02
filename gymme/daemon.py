@@ -387,8 +387,12 @@ async def start_daemon():
         await daemon_sleep(strategy, args.eager_interval, args.interval)
 
 
-if __name__ == "__main__":
+def main():
     try:
         asyncio.run(start_daemon())
     except KeyboardInterrupt:
         log.info("Gracefully shutting down ...")
+
+
+if __name__ == "__main__":
+    main()
