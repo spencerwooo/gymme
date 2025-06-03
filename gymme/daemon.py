@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Callable
+from typing import Any, Callable
 
 import httpx
 from dotenv import load_dotenv
@@ -13,13 +13,6 @@ from rich.logging import RichHandler
 
 from gymme.client import GymClient, GymField
 from gymme.errors import GymOverbookedError, GymRequestError, GymRequestRateLimitedError, GymServerError
-
-logging.basicConfig(
-    level="INFO",
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)],
-)
 
 
 class StrategyMode(Enum):
@@ -67,7 +60,7 @@ class GymDaemon:
         token: str = "",
         open_id: str = "",
         send_key: str = "",
-        logger: logging.Logger = None,
+        log: logging.Logger = None,
     ):
         """Gymme Daemon for monitoring and eagerly creating orders for gym fields.
 
@@ -88,7 +81,7 @@ class GymDaemon:
             token (str, optional): Authentication token for gym API. Defaults to "".
             open_id (str, optional): OpenID for user identification. Defaults to "".
             send_key (str, optional): Key for sending notifications via ServerChan. Defaults to "".
-            logger (logging.Logger, optional): Custom logger instance. Defaults to None.
+            log (logging.Logger, optional): Custom logger instance. Defaults to None.
         """
 
         self.days = days
@@ -100,7 +93,7 @@ class GymDaemon:
         self.max_retries = max_retries
         self.consider_solo_fields = consider_solo_fields
         self.send_key = send_key
-        self.log = logger or logging.getLogger(__name__)
+        self.log = log or logging.getLogger(__name__)
         self.gym = GymClient(token, open_id, sport_id=51)
         self.banner = """
 
@@ -154,7 +147,9 @@ class GymDaemon:
         resp = httpx.post(url, json=params, headers=headers)
         self.log.info(f"Notification server response: {resp.json()}")
 
-    async def _request_with_retry(self, request_fn: Callable, max_retries: int, req_interval: float = None):
+    async def _request_with_retry(
+        self, request_fn: Callable[[Any], Any], max_retries: int, req_interval: float = None
+    ) -> Any:
         """Retry wrapper for requests to handle rate limits and server errors."""
         for i in range(max_retries):
             try:
@@ -421,6 +416,12 @@ async def start_daemon():
     send_key = os.getenv("SEND_KEY", "")
 
     args = parse_args()
+    logging.basicConfig(
+        level="INFO",
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(rich_tracebacks=True)],
+    )
     log = logging.getLogger(__name__)
 
     daemon = GymDaemon(
@@ -435,7 +436,7 @@ async def start_daemon():
         token=token,
         open_id=open_id,
         send_key=send_key,
-        logger=log,
+        log=log,
     )
     await daemon.start()
 
