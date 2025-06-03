@@ -4,11 +4,17 @@
 
 ![screenshot](https://github.com/user-attachments/assets/d4b627e9-4c28-45cd-9fe2-eaa275ceab56)
 
-使用 uv 管理、安装此项目。
+## 抓包准备
 
-<https://docs.astral.sh/uv/>
+为了模拟微信中对体育馆服务的请求，`gymme` 需要抓包工具来获取必要的请求头信息。推荐使用 [Charles](https://www.charlesproxy.com/) 或 [Fiddler](https://www.telerik.com/fiddler) 等抓包工具。下文以 Charles 为例。
 
-首先，使用 Charles 抓包工具在请求头中找到必要的变量，即 `token` 和 `open_id`。可选择在 <https://sct.ftqq.com/> 获取通知服务密钥 (`send_key`)，需关注微信公众号“方糖”。
+1. 使用 Charles 代理电脑流量，并在微信电脑版中打开体育馆预约页面。
+2. **选择中关村体育馆，选择任何球类运动、场地和时间段，点击“提交订单”，并在“确认订单”界面点击“提交并支付订单”，无需支付。**
+3. 回到 Charles，寻找请求路径为 `/api/order/submit` 的 POST 请求。
+4. 在请求头（Headers）中找到 `token` 并记录：
+5. 在请求内容（Contents）中找到 `open_id` 并记录：
+
+此外，可选择在 <https://sct.ftqq.com/> 获取通知服务密钥 (`send_key`)，需关注微信公众号“方糖”。
 
 之后，根据自己的配置和偏好修改 `conf/pref.yaml` 配置文件。
 
@@ -58,16 +64,14 @@ open_id: "ENTER_YOUR_OPENID_HERE"
 send_key: "ENTER_YOUR_SEND_KEY_HERE"
 ```
 
+## 安装依赖
+
+使用 uv 管理、安装此项目。首先，安装 uv：<https://docs.astral.sh/uv/>
+
 然后，安装依赖。
 
 ```bash
 uv sync
-```
-
-最后，启动守护进程，开启捡漏与抢场模式。
-
-```bash
-uv run gymme --config-path conf/pref.yaml --days 0 1 2
 ```
 
 可用的命令行选项：
@@ -101,14 +105,31 @@ options:
                         Consider solo fields (1 hour)
 ```
 
+命令行选项定义如下：
+
 | 选项                     | 说明                                                 | 示例                           |
 | ------------------------ | ---------------------------------------------------- | ------------------------------ |
 | `--config-path`          | 配置文件路径                                         | `--config-path conf/pref.yaml` |
 | `--days`                 | 监控天数偏移量（0=今天，1=明天，以此类推）           | `--days 0 1 2`                 |
 | `--req-interval`         | 请求间隔时间（秒），避免触发频率限制                 | `--req-interval 0.5`           |
 | `--interval`             | 常规监控间隔时间（秒）                               | `--interval 30`                |
-| `--eager-interval`       | 抢夺模式检查间隔时间（秒）                           | `--eager-interval 5`           |
-| `--concurrency`          | 抢夺模式下并发订单尝试数                             | `--concurrency 3`              |
+| `--eager-interval`       | 抢场模式检查间隔时间（秒）                           | `--eager-interval 5`           |
+| `--concurrency`          | 抢场模式下并发订单尝试数                             | `--concurrency 3`              |
 | `--refresh-time`         | 计划刷新时间（HH:MM 格式）                           | `--refresh-time 07:00`         |
 | `--max-retries`          | 请求重试次数                                         | `--max-retries 3`              |
 | `--consider-solo-fields` | 是否考虑单次场地（即 1 小时场，默认只考虑 2 小时场） | `--consider-solo-fields`       |
+
+最后，启动 gymme 守护进程，开启捡漏与抢场模式。
+
+```bash
+uv run gymme --config-path conf/pref.yaml --days 0 1 2
+```
+
+gymme 将：
+
+1. 对指定天数（0=今天，1=明天，2=后天）进行监控。
+2. 在常规监控模式（捡漏）下（07:30 - 23:59）每隔指定时间（`--interval`）检查可用场地，如发现符合偏好设置的场地，将尝试下单。
+3. 在抢场模式下（00:00 - 07:29）每隔指定时间（`--eager-interval`）检查可用场地，并按偏好顺序尝试下单，支持并发请求。
+4. 在其余时间休眠（00:00 - 06:54）。
+
+祝，打球愉快。

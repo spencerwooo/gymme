@@ -63,7 +63,7 @@ class GymmeDaemon:
 
         Strategy Modes:
         - Hibernate mode (休眠模式): 00:00-06:54 - Daemon sleeps to conserve resources during inactive hours.
-        - Eager mode (抢单模式): 06:55-07:29 - Aggressively attempts to create orders at schedule refresh time (07:00).
+        - Eager mode (抢场模式): 06:55-07:29 - Aggressively attempts to create orders at schedule refresh time (07:00).
         - Normal mode (捡漏模式): 07:30-23:59 - Monitors available fields and attempts to create orders based on preferences.
 
         Args:
@@ -260,7 +260,7 @@ class GymmeDaemon:
         return False
 
     async def start_eager_monitor(self) -> bool:
-        """Eager ordering strategy for peak hours -- 抢单模式
+        """Eager ordering strategy for peak hours -- 抢场模式
 
         This strategy is designed to quickly attempt to create orders for the day after tomorrow (offset=2)
         at the specified refresh time (default: 7:00 AM) when new fields become available.
