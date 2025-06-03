@@ -57,6 +57,7 @@ class GymDaemon:
         refresh_time: str,
         max_retries: int,
         consider_solo_fields: bool,
+        config_path: str | None = None,
         token: str = "",
         open_id: str = "",
         send_key: str = "",
@@ -92,6 +93,7 @@ class GymDaemon:
         self.refresh_time = refresh_time
         self.max_retries = max_retries
         self.consider_solo_fields = consider_solo_fields
+        self.config_path = config_path
         self.send_key = send_key
         self.log = log or logging.getLogger(__name__)
         self.gym = GymClient(token, open_id, sport_id=51)
@@ -241,7 +243,9 @@ class GymDaemon:
                 )
 
             # Create field scene candidates, sorted by preference
-            field_candidates = self.gym.create_field_scenes_candidate(fields_available, self.consider_solo_fields)
+            field_candidates = self.gym.create_field_scenes_candidate(
+                self.config_path, fields_available, self.consider_solo_fields
+            )
             if not field_candidates:
                 self.log.info(f"No preferred fields available for {day}. Skipping...")
                 continue
@@ -280,7 +284,9 @@ class GymDaemon:
 
         # (Warm up) Load available fields for the day and create candidates used for the entire period
         fields_available = await self.gym.get_available_fields(offset)
-        field_candidates = self.gym.create_field_scenes_candidate(fields_available)
+        field_candidates = self.gym.create_field_scenes_candidate(
+            self.config_path, fields_available, self.consider_solo_fields
+        )
         if not field_candidates:
             self.log.info(f"No preferred fields available for {day}.")
             return False

@@ -12,10 +12,11 @@ from rich import box, print
 from rich.table import Table
 
 from gymme.config import (
-    field_pref_scores,
+    # field_pref_scores,
     fields_cfg,
-    hour_pref_scores,
     hours_cfg,
+    # hour_pref_scores,
+    load_pref,
     prices_cfg,
 )
 from gymme.errors import (
@@ -333,13 +334,15 @@ class GymClient:
 
     @staticmethod
     def create_field_scenes_candidate(
-        available_fields: list[GymField], consider_solo_fields: bool = False
+        config_path: str | None, available_fields: list[GymField], consider_solo_fields: bool = False
     ) -> list[list[GymField]]:
         """Select and sort field scenes by preference scores, prepare for booking."""
+        field_prefs, hour_prefs = load_pref(config_path)
+
         field_candidates = []
         for f in available_fields:
-            field_pref = field_pref_scores.get(f.field_id, 0)
-            hour_pref = hour_pref_scores.get(str(f.hour_id), 0)
+            field_pref = field_prefs.get(f.field_id, 0)
+            hour_pref = hour_prefs.get(str(f.hour_id), 0)
 
             # Only consider fields with positive preferences
             if field_pref > 0 and hour_pref > 0:

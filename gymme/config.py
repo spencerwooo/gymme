@@ -1,35 +1,31 @@
-# Preferences defined as:
-# -> 0: ignore, 1: ok to book, 5: very much preferred, 10: must book
-field_pref_scores = {
-    "220": 1,  # 主馆1
-    "221": 5,  # 主馆2
-    "222": 7,  # 主馆3
-    "223": 2,  # 主馆4
-    "224": 3,  # 主馆5
-    "225": 8,  # 主馆6
-    "226": 6,  # 主馆7
-    "227": 4,  # 主馆8
-    "228": 1,  # 副馆9
-    "229": 2,  # 副馆10
-    "230": 3,  # 副馆11
-    "231": 4,  # 副馆12
-}
-hour_pref_scores = {
-    "328228": 0,  # 8:00-9:00
-    "328229": 0,  # 9:00-10:00
-    "328230": 2,  # 10:00-11:00
-    "328231": 3,  # 11:00-12:00
-    "328232": 5,  # 12:00-13:00
-    "328233": 7,  # 13:00-14:00
-    "328234": 9,  # 14:00-15:00
-    "328235": 10,  # 15:00-16:00
-    "328236": 10,  # 16:00-17:00
-    "328237": 0,  # 17:00-18:00
-    "328238": 0,  # 18:00-19:00
-    "328239": 0,  # 19:00-20:00
-    "328240": 0,  # 20:00-21:00
-    "328241": 0,  # 21:00-22:00
-}
+import yaml
+import os
+
+
+def load_pref(config_path: str = None) -> tuple[dict, dict]:
+    """
+    Load user preferences from the configuration file.
+
+    Preferences defined as:
+    -> 0: ignore, 1: ok to book, 5: very much preferred, 10: must book
+
+    Args:
+        config_path: Path to the preference config file. Defaults to conf/pref.yaml
+
+    Returns:
+        tuple: A tuple containing two elements:
+            - field_pref_scores: Dictionary of field preference scores
+            - hour_pref_scores: Dictionary of hour preference scores
+    """
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(__file__), "..", "conf", "pref.yaml")
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        pref_config = yaml.safe_load(f)
+    return pref_config["field_pref_scores"], pref_config["hour_pref_scores"]
+
+
+field_pref_scores, hour_pref_scores = load_pref()
 
 # Hard-coded configurations if request fails at peak hours.
 # No changes are expected here, but can be modified for future updates.
