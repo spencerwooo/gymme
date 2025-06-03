@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 import urllib.parse
 from dataclasses import dataclass, fields
@@ -7,18 +6,10 @@ from datetime import datetime, timedelta
 
 import hishel
 import httpx
-from dotenv import load_dotenv
 from rich import box, print
 from rich.table import Table
 
-from gymme.config import (
-    # field_pref_scores,
-    fields_cfg,
-    hours_cfg,
-    # hour_pref_scores,
-    load_pref,
-    prices_cfg,
-)
+from gymme.config import fields_cfg, hours_cfg, load_config, prices_cfg
 from gymme.errors import (
     GymFieldOccupiedError,
     GymOverbookedError,
@@ -53,7 +44,7 @@ class GymField:
     pref_score: int = 0  # Preference score for sorting, default is 0
 
 
-class GymClient:
+class GymmeClient:
     def __init__(self, token: str, open_id: str, sport_id: int = 51) -> None:
         self.log = logging.getLogger(__name__)
         self.token = token
@@ -334,11 +325,9 @@ class GymClient:
 
     @staticmethod
     def create_field_scenes_candidate(
-        config_path: str | None, available_fields: list[GymField], consider_solo_fields: bool = False
+        available_fields: list[GymField], field_prefs: dict, hour_prefs: dict, consider_solo_fields: bool = False
     ) -> list[list[GymField]]:
         """Select and sort field scenes by preference scores, prepare for booking."""
-        field_prefs, hour_prefs = load_pref(config_path)
-
         field_candidates = []
         for f in available_fields:
             field_pref = field_prefs.get(f.field_id, 0)
@@ -387,10 +376,8 @@ def show_schedule_table(day: str, schedule_booked: dict, fields: dict, hours: di
 
 
 async def test_cancel_order():
-    load_dotenv()
-    token = os.getenv("TOKEN", "")
-    open_id = os.getenv("OPEN_ID", "")
-    gym = GymClient(token, open_id)
+    cfg = load_config()
+    gym = GymmeClient(cfg.token, cfg.open_id)
     print(await gym.get_orders())
 
     # print(await gym.cancel_order_by_id("20250527190804352568"))
@@ -416,10 +403,8 @@ async def test_cancel_order():
 
 
 async def main():
-    load_dotenv()
-    token = os.getenv("TOKEN", "")
-    open_id = os.getenv("OPEN_ID", "")
-    gym = GymClient(token, open_id)
+    cfg = load_config()
+    gym = GymmeClient(cfg.token, cfg.open_id)
 
     # Offset meanings: today = 0, tomorrow = 1, day after tomorrow = 2
     offset = 1

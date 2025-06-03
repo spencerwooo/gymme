@@ -1,10 +1,21 @@
-import yaml
 import os
+from dataclasses import dataclass
+
+import yaml
 
 
-def load_pref(config_path: str = None) -> tuple[dict, dict]:
+@dataclass
+class GymmeConfig:
+    field_prefs: dict[str, int]
+    hour_prefs: dict[str, int]
+    token: str
+    open_id: str
+    send_key: str
+
+
+def load_config(config_path: str = None) -> GymmeConfig:
     """
-    Load user preferences from the configuration file.
+    Load user preferences and essential configurations from the config file.
 
     Preferences defined as:
     -> 0: ignore, 1: ok to book, 5: very much preferred, 10: must book
@@ -13,19 +24,23 @@ def load_pref(config_path: str = None) -> tuple[dict, dict]:
         config_path: Path to the preference config file. Defaults to conf/pref.yaml
 
     Returns:
-        tuple: A tuple containing two elements:
-            - field_pref_scores: Dictionary of field preference scores
-            - hour_pref_scores: Dictionary of hour preference scores
+        GymmeConfig: Configuration object containing field prefs, hour prefs, auth
+            token, open ID, and send key loaded from the YAML file
     """
+
     if config_path is None:
         config_path = os.path.join(os.path.dirname(__file__), "..", "conf", "pref.yaml")
 
     with open(config_path, "r", encoding="utf-8") as f:
-        pref_config = yaml.safe_load(f)
-    return pref_config["field_pref_scores"], pref_config["hour_pref_scores"]
+        cfg = yaml.safe_load(f)
+        return GymmeConfig(
+            field_prefs=cfg.get("field_prefs", {}),
+            hour_prefs=cfg.get("hour_prefs", {}),
+            token=cfg.get("token", ""),
+            open_id=cfg.get("open_id", ""),
+            send_key=cfg.get("send_key", ""),
+        )
 
-
-field_pref_scores, hour_pref_scores = load_pref()
 
 # Hard-coded configurations if request fails at peak hours.
 # No changes are expected here, but can be modified for future updates.

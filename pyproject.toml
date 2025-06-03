@@ -5,7 +5,6 @@ description = "百丽宫中关村羽毛球捡漏王"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "dotenv>=0.9.9",
     "hishel>=0.1.2",
     "httpx>=0.28.1",
     "mypy>=1.15.0",

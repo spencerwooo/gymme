@@ -1,21 +1,20 @@
 import argparse
 import asyncio
 import logging
-import os
 import re
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable
 
 import httpx
-from dotenv import load_dotenv
 from rich.logging import RichHandler
 
-from gymme.client import GymClient, GymField
+from gymme.client import GymmeClient, GymField
+from gymme.config import load_config
 from gymme.errors import GymOverbookedError, GymRequestError, GymRequestRateLimitedError, GymServerError
 
 
-class StrategyMode(Enum):
+class GymmeStrategy(Enum):
     NORMAL = "normal"
     EAGER = "eager"
     HIBERNATE = "hibernate"
@@ -26,7 +25,7 @@ class StrategyMode(Enum):
         now: datetime.time,
         eager_time: tuple[str, str] = ("6:55", "7:29"),
         normal_time: tuple[str, str] = ("7:30", "23:59"),
-    ) -> "StrategyMode":
+    ) -> "GymmeStrategy":
         """Resolve strategy mode based on current time."""
 
         def parse_time(time_str: str) -> datetime.time:
@@ -46,9 +45,10 @@ class StrategyMode(Enum):
             return cls.HIBERNATE
 
 
-class GymDaemon:
+class GymmeDaemon:
     def __init__(
         self,
+        config_path: str | None,
         days: list[int],
         req_interval: int,
         interval: int,
@@ -57,10 +57,6 @@ class GymDaemon:
         refresh_time: str,
         max_retries: int,
         consider_solo_fields: bool,
-        config_path: str | None = None,
-        token: str = "",
-        open_id: str = "",
-        send_key: str = "",
         log: logging.Logger = None,
     ):
         """Gymme Daemon for monitoring and eagerly creating orders for gym fields.
@@ -71,6 +67,7 @@ class GymDaemon:
         - Normal mode (捡漏模式): 07:30-23:59 - Monitors available fields and attempts to create orders based on preferences.
 
         Args:
+            config_path (str, optional): Path to gymme config file.
             days (list[int]): List of day offsets to monitor (e.g., [0, 1, 2] for today, tomorrow, day after).
             req_interval (int): Time interval between API requests in seconds to avoid rate limits.
             interval (int): Time interval between monitoring cycles in normal mode (seconds).
@@ -79,9 +76,6 @@ class GymDaemon:
             refresh_time (str): Time when new bookings become available (format: "HH:MM").
             max_retries (int): Maximum number of retry attempts for failed requests.
             consider_solo_fields (bool): Whether to consider single-person fields for booking.
-            token (str, optional): Authentication token for gym API. Defaults to "".
-            open_id (str, optional): OpenID for user identification. Defaults to "".
-            send_key (str, optional): Key for sending notifications via ServerChan. Defaults to "".
             log (logging.Logger, optional): Custom logger instance. Defaults to None.
         """
 
@@ -93,10 +87,14 @@ class GymDaemon:
         self.refresh_time = refresh_time
         self.max_retries = max_retries
         self.consider_solo_fields = consider_solo_fields
-        self.config_path = config_path
-        self.send_key = send_key
         self.log = log or logging.getLogger(__name__)
-        self.gym = GymClient(token, open_id, sport_id=51)
+
+        cfg = load_config(config_path)
+        self.gym = GymmeClient(cfg.token, cfg.open_id, sport_id=51)
+        self.send_key = cfg.send_key
+        self.field_prefs = cfg.field_prefs
+        self.hour_prefs = cfg.hour_prefs
+
         self.banner = """
 
       ___       ___          ___          ___          ___     
@@ -244,7 +242,7 @@ class GymDaemon:
 
             # Create field scene candidates, sorted by preference
             field_candidates = self.gym.create_field_scenes_candidate(
-                self.config_path, fields_available, self.consider_solo_fields
+                fields_available, self.field_prefs, self.hour_prefs, self.consider_solo_fields
             )
             if not field_candidates:
                 self.log.info(f"No preferred fields available for {day}. Skipping...")
@@ -285,7 +283,7 @@ class GymDaemon:
         # (Warm up) Load available fields for the day and create candidates used for the entire period
         fields_available = await self.gym.get_available_fields(offset)
         field_candidates = self.gym.create_field_scenes_candidate(
-            self.config_path, fields_available, self.consider_solo_fields
+            fields_available, self.field_prefs, self.hour_prefs, self.consider_solo_fields
         )
         if not field_candidates:
             self.log.info(f"No preferred fields available for {day}.")
@@ -325,10 +323,10 @@ class GymDaemon:
 
         return False
 
-    async def daemon_sleep(self, mode: StrategyMode, eager_start: str = "06:55") -> None:
+    async def daemon_sleep(self, strategy: GymmeStrategy, eager_start: str = "06:55") -> None:
         """Automatically resolve sleep interval based on the current time and strategy mode."""
-        match mode:
-            case StrategyMode.HIBERNATE:
+        match strategy:
+            case GymmeStrategy.HIBERNATE:
                 now = datetime.now()
 
                 # Parse target eager start time
@@ -342,10 +340,10 @@ class GymDaemon:
                 # Time to sleep until the next eager start time, minimum 1 second
                 interval = max(int((target_datetime - now).total_seconds()), 1)
 
-            case StrategyMode.EAGER:
+            case GymmeStrategy.EAGER:
                 interval = self.eager_interval
 
-            case StrategyMode.NORMAL:
+            case GymmeStrategy.NORMAL:
                 interval = self.interval
 
             case _:
@@ -360,26 +358,26 @@ class GymDaemon:
         while True:
             # Resolve strategy mode based on current time first
             now = datetime.now().time()
-            strategy = StrategyMode.from_time(now)
+            strategy = GymmeStrategy.from_time(now)
 
             # Only setup connection if not hibernating to avoid unnecessary requests
-            if strategy != StrategyMode.HIBERNATE:
+            if strategy != GymmeStrategy.HIBERNATE:
                 await self.gym.setup()
 
             order_created = False
             try:
                 match strategy:
                     # Hibernate period: 0:00 - 6:54
-                    case StrategyMode.HIBERNATE:
+                    case GymmeStrategy.HIBERNATE:
                         self.log.info(f"Current time [{now:%H:%M:%S}]. Daemon hibernating ...")
 
                     # Eager ordering period: 6:55 - 7:29
-                    case StrategyMode.EAGER:
+                    case GymmeStrategy.EAGER:
                         self.log.info(f"Current time [{now:%H:%M:%S}]. Starting eager ordering strategy.")
                         order_created = await self.start_eager_monitor()
 
                     # Normal monitoring period: 7:30 - 23:59
-                    case StrategyMode.NORMAL:
+                    case GymmeStrategy.NORMAL:
                         self.log.info(f"Current time [{now:%H:%M:%S}]. Starting normal monitoring strategy.")
                         order_created = await self.start_normal_monitor()
 
@@ -404,6 +402,7 @@ class GymDaemon:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="gymme daemon -- 百丽宫中关村羽毛球捡漏王已开启！")
+    parser.add_argument("--config-path", type=str, default="conf/pref.yaml", help="Path to gymme config file")
     parser.add_argument("--days", nargs="+", type=int, default=[0], help="Days offset to monitor (e.g., --days 0 1 2)")
     parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests to avoid rate limits")
     parser.add_argument("--interval", type=int, default=600, help="Interval between checks")
@@ -416,12 +415,6 @@ def parse_args():
 
 
 async def start_daemon():
-    load_dotenv()
-    token = os.getenv("TOKEN", "")
-    open_id = os.getenv("OPEN_ID", "")
-    send_key = os.getenv("SEND_KEY", "")
-
-    args = parse_args()
     logging.basicConfig(
         level="INFO",
         format="%(message)s",
@@ -430,7 +423,9 @@ async def start_daemon():
     )
     log = logging.getLogger(__name__)
 
-    daemon = GymDaemon(
+    args = parse_args()
+    daemon = GymmeDaemon(
+        config_path=args.config_path,
         days=args.days,
         req_interval=args.req_interval,
         interval=args.interval,
@@ -439,9 +434,6 @@ async def start_daemon():
         refresh_time=args.refresh_time,
         max_retries=args.max_retries,
         consider_solo_fields=args.consider_solo_fields,
-        token=token,
-        open_id=open_id,
-        send_key=send_key,
         log=log,
     )
     await daemon.start()
