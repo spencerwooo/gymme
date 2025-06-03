@@ -2,17 +2,22 @@
 
 > /ˈɡɪmi/ (gymme == gimme!) - 百丽宫中关村羽毛球捡漏王
 
-![screenshot](https://github.com/user-attachments/assets/d4b627e9-4c28-45cd-9fe2-eaa275ceab56)
+![image](https://github.com/user-attachments/assets/53bb1b19-bc7c-441f-a005-b179c44a5189)
 
 ## 抓包准备
 
 为了模拟微信中对体育馆服务的请求，`gymme` 需要抓包工具来获取必要的请求头信息。推荐使用 [Charles](https://www.charlesproxy.com/) 或 [Fiddler](https://www.telerik.com/fiddler) 等抓包工具。下文以 Charles 为例。
 
-1. 使用 Charles 代理电脑流量，并在微信电脑版中打开体育馆预约页面。
+1. 使用 Charles 代理电脑流量，并在 **微信电脑版** 中，用 **微信浏览器** 打开体育馆预约页面。
 2. **选择中关村体育馆，选择任何球类运动、场地和时间段，点击“提交订单”，并在“确认订单”界面点击“提交并支付订单”，无需支付。**
 3. 回到 Charles，寻找请求路径为 `/api/order/submit` 的 POST 请求。
 4. 在请求头（Headers）中找到 `token` 并记录：
-5. 在请求内容（Contents）中找到 `open_id` 并记录：
+
+   ![PixPin_2025-06-03_12-00-00](https://github.com/user-attachments/assets/b76db2ef-a46e-4b66-b033-47b3686c3d14)
+
+6. 在请求内容（Contents）中找到 `open_id` 并记录：
+
+   ![PixPin_2025-06-03_12-00-40](https://github.com/user-attachments/assets/7d8994c8-db59-41a3-b3d7-6e019c2ddbe8)
 
 此外，可选择在 <https://sct.ftqq.com/> 获取通知服务密钥 (`send_key`)，需关注微信公众号“方糖”。
 
