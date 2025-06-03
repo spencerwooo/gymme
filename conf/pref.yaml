@@ -35,6 +35,9 @@ hour_pref_scores:
   "328240": 1 # 20:00-21:00
   "328241": 1 # 21:00-22:00
 
+# 抓包获得以下两个重要变量
 token: "ENTER_YOUR_TOKEN_HERE"
 open_id: "ENTER_YOUR_OPENID_HERE"
+
+# 可选设置微信服务号“方糖”推送通知
 send_key: "ENTER_YOUR_SEND_KEY_HERE"
