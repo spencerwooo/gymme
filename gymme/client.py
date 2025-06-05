@@ -169,13 +169,15 @@ class GymmeClient:
         resp = await self._create_gym_request(url, params=params, cache=False)
         return resp.data
 
-    async def get_sport_schedule_booked(self, day: str) -> dict:
+    async def get_sport_schedule_booked(self, day: str, cache: bool = False) -> dict:
         """
         Schedule: {'<field_id>-<hour_id>': <status_id>, ...}
         Status: 0 - available, others - booked
+
+        Note: This API response should be cached under eager mode to avoid server errors after warm-up.
         """
         url = f"http://gym.dazuiwl.cn/api/sport_schedule/booked/id/{self.sport_id}"
-        resp = await self._create_gym_request(url, params={"day": day}, cache=False)
+        resp = await self._create_gym_request(url, params={"day": day}, cache=cache)
         return resp.data
 
     async def get_prices(self, week: int, day: str) -> dict:
@@ -293,19 +295,19 @@ class GymmeClient:
 
         # Parse trade number from response and construct redirect URL for payment
         pattern = re.search(r"name='tenantTradeNumber' value='([^']+)'", resp.data)
-        if pattern:
-            trade_number = pattern.group(1)
-            return f"http://gym.dazuiwl.cn/h5/#/pages/myBookingDetails/myBookingDetails?id={trade_number}"
-        else:
+        if not pattern:
             raise ValueError("Could not extract trade number from response")
 
-    async def get_available_fields(self, offset: int = 0) -> list[GymField]:
+        trade_number = pattern.group(1)
+        return f"http://gym.dazuiwl.cn/h5/#/pages/myBookingDetails/myBookingDetails?id={trade_number}"
+
+    async def get_available_fields(self, offset: int = 0, cache: bool = False) -> list[GymField]:
         """Get available fields for booking on a specific day."""
         if self.fields is None or self.hours is None:
             await self.setup()
 
         day = self.create_relative_date(offset)
-        schedule_booked = await self.get_sport_schedule_booked(day)
+        schedule_booked = await self.get_sport_schedule_booked(day, cache)  # should be cached under eager mode
 
         available_fields = []
         for field_id, field_name in self.fields.items():

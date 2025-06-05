@@ -15,7 +15,7 @@
 
    ![PixPin_2025-06-03_12-00-00](https://github.com/user-attachments/assets/b76db2ef-a46e-4b66-b033-47b3686c3d14)
 
-6. 在请求内容（Contents）中找到 `open_id` 并记录：
+5. 在请求内容（Contents）中找到 `open_id` 并记录：
 
    ![PixPin_2025-06-03_12-00-40](https://github.com/user-attachments/assets/7d8994c8-db59-41a3-b3d7-6e019c2ddbe8)
 
@@ -95,11 +95,11 @@ options:
                         Path to gymme config file
   --days DAYS [DAYS ...]
                         Days offset to monitor (e.g., --days 0 1 2)
+  --interval INTERVAL   Interval for normal monitoring (seconds)
+  --eager-interval EAGER_INTERVAL
+                        Interval for eager mode (seconds)
   --req-interval REQ_INTERVAL
                         Interval between requests to avoid rate limits
-  --interval INTERVAL   Interval between checks
-  --eager-interval EAGER_INTERVAL
-                        Interval for eager checking
   --concurrency CONCURRENCY
                         Concurrent order attempts during eager mode
   --refresh-time REFRESH_TIME
@@ -116,9 +116,9 @@ options:
 | ------------------------ | ---------------------------------------------------- | ------------------------------ |
 | `--config-path`          | 配置文件路径                                         | `--config-path conf/pref.yaml` |
 | `--days`                 | 监控天数偏移量（0=今天，1=明天，以此类推）           | `--days 0 1 2`                 |
-| `--req-interval`         | 请求间隔时间（秒），避免触发频率限制                 | `--req-interval 0.5`           |
 | `--interval`             | 常规监控间隔时间（秒）                               | `--interval 30`                |
-| `--eager-interval`       | 抢场模式检查间隔时间（秒）                           | `--eager-interval 5`           |
+| `--eager-interval`       | 抢场模式间隔时间（秒）                               | `--eager-interval 5`           |
+| `--req-interval`         | 请求间隔时间（秒），避免触发频率限制                 | `--req-interval 0.5`           |
 | `--concurrency`          | 抢场模式下并发订单尝试数                             | `--concurrency 3`              |
 | `--refresh-time`         | 计划刷新时间（HH:MM 格式）                           | `--refresh-time 07:00`         |
 | `--max-retries`          | 请求重试次数                                         | `--max-retries 3`              |

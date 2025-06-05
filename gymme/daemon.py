@@ -156,14 +156,14 @@ class GymmeDaemon:
                 return await request_fn()
             except GymRequestRateLimitedError as e:
                 if i < max_retries - 1:
-                    delay = req_interval or 0.5
-                    self.log.warning(f"Rate limited: {e}. Retrying in {delay} seconds...")
+                    delay = req_interval or 10
+                    self.log.warning(f"Rate limited: {e}. Retrying in {delay} seconds.")
                     await asyncio.sleep(delay)
                     continue
                 raise
             except (GymRequestError, GymServerError, httpx.HTTPError) as e:
                 if i < max_retries - 1:
-                    self.log.warning(f"Attempt {i + 1}/{max_retries} failed: {e}. Retrying immediately...")
+                    self.log.warning(f"Attempt {i + 1}/{max_retries} failed: {e}. Retrying in 0.5 seconds.")
                     await asyncio.sleep(0.5)  # Short delay before retrying
                     continue
                 raise
@@ -172,7 +172,7 @@ class GymmeDaemon:
     async def _make_order_attempt(self, offset: int, day: str, field: list[GymField]) -> bool:
         """Attempt to create an order for a specific field on a given day with retries enabled."""
         order_attempt_details = f"{day} {[f.field_desc for f in field]}"
-        self.log.info(f"Attempting to create order for {order_attempt_details} ...")
+        self.log.info(f"Attempting to create order for {order_attempt_details}.")
 
         async def _make_order_fn():
             return await self.gym.create_order(offset, day, field)
@@ -245,7 +245,7 @@ class GymmeDaemon:
                 fields_available, self.field_prefs, self.hour_prefs, self.consider_solo_fields
             )
             if not field_candidates:
-                self.log.info(f"No preferred fields available for {day}. Skipping...")
+                self.log.info(f"No preferred fields available for {day}. Skipping.")
                 continue
 
             # Sequentially attempt to create orders for each field scene
@@ -281,7 +281,7 @@ class GymmeDaemon:
         day = self.gym.create_relative_date(offset)
 
         # (Warm up) Load available fields for the day and create candidates used for the entire period
-        fields_available = await self.gym.get_available_fields(offset)
+        fields_available = await self.gym.get_available_fields(offset, cache=True)
         field_candidates = self.gym.create_field_scenes_candidate(
             fields_available, self.field_prefs, self.hour_prefs, self.consider_solo_fields
         )
@@ -296,7 +296,7 @@ class GymmeDaemon:
         target_time = datetime.strptime(self.refresh_time, "%H:%M").time()
         if now < target_time:
             delay = (datetime.combine(datetime.now().date(), target_time) - datetime.now()).total_seconds()
-            self.log.info(f"Warmed up. Waiting {delay:.0f} seconds until 7:00 AM...")
+            self.log.info(f"Warmed up. Waiting {delay:.0f} seconds until {target_time}...")
             await asyncio.sleep(delay)
 
         # Process field candidates in batches based on concurrency
@@ -321,7 +321,9 @@ class GymmeDaemon:
             if i + self.concurrency < len(field_candidates):
                 await asyncio.sleep(self.req_interval)
 
-        return False
+        # At the end of all attempts, try to recover the latest order if any
+        self.log.info("No orders successfully returned from eager attempts. Attempting to recover latest order.")
+        return await self._recover_latest_order()
 
     async def daemon_sleep(self, strategy: GymmeStrategy, eager_start: str = "06:55") -> None:
         """Automatically resolve sleep interval based on the current time and strategy mode."""
@@ -369,7 +371,7 @@ class GymmeDaemon:
                 match strategy:
                     # Hibernate period: 0:00 - 6:54
                     case GymmeStrategy.HIBERNATE:
-                        self.log.info(f"Current time [{now:%H:%M:%S}]. Daemon hibernating ...")
+                        self.log.info(f"Current time [{now:%H:%M:%S}]. Daemon hibernating.")
 
                     # Eager ordering period: 6:55 - 7:29
                     case GymmeStrategy.EAGER:
@@ -392,7 +394,7 @@ class GymmeDaemon:
                 continue
 
             except Exception as e:
-                self.log.exception(f"Unexpected error in daemon loop: {e}")
+                self.log.error(f"Unexpected error in daemon loop: {e}. Retrying in {self.req_interval} seconds.")
                 await asyncio.sleep(self.req_interval)
                 continue
 
@@ -404,11 +406,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="gymme daemon -- 百丽宫中关村羽毛球捡漏王已开启！")
     parser.add_argument("--config-path", type=str, default="conf/pref.yaml", help="Path to gymme config file")
     parser.add_argument("--days", nargs="+", type=int, default=[0], help="Days offset to monitor (e.g., --days 0 1 2)")
+    parser.add_argument("--interval", type=int, default=600, help="Interval for normal monitoring (seconds)")
+    parser.add_argument("--eager-interval", type=int, default=60, help="Interval for eager mode (seconds)")
     parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests to avoid rate limits")
-    parser.add_argument("--interval", type=int, default=600, help="Interval between checks")
-    parser.add_argument("--eager-interval", type=int, default=60, help="Interval for eager checking")
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent order attempts during eager mode")
-    parser.add_argument("--refresh-time", type=str, default="07:00", help="Schedule refresh time (HH:MM format)")
+    parser.add_argument("--refresh-time", type=str, default="07:05", help="Schedule refresh time (HH:MM format)")
     parser.add_argument("--max-retries", type=int, default=5, help="Retry attempts for server errors")
     parser.add_argument("--consider-solo-fields", action="store_true", help="Consider solo fields (1 hour)")
     return parser.parse_args()
@@ -443,7 +445,7 @@ def main():
     try:
         asyncio.run(start_daemon())
     except KeyboardInterrupt:
-        print("Gracefully shutting down ...")
+        print("Gracefully shutting down.")
 
 
 if __name__ == "__main__":
