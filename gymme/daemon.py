@@ -263,7 +263,7 @@ class GymmeDaemon:
         """Eager ordering strategy for peak hours -- 抢场模式
 
         This strategy is designed to quickly attempt to create orders for the day after tomorrow (offset=2)
-        at the specified refresh time (default: 7:00 AM) when new fields become available.
+        at the specified refresh time (default: 7:04 AM) when new fields become available.
 
         1. Only activates for the day after tomorrow (offset=2).
         2. Retrieves available fields for that day and creates candidates based on preferences.
@@ -291,7 +291,7 @@ class GymmeDaemon:
 
         self.log.info(f"{len(fields_available)} available fields for {day}:\n{self._fields_repr(fields_available)}")
 
-        # Fire off at exactly target_time (default: 7:00 AM)
+        # Fire off at exactly target_time (default: 7:04 AM)
         now = datetime.now().time()
         target_time = datetime.strptime(self.refresh_time, "%H:%M").time()
         if now < target_time:
@@ -410,7 +410,7 @@ def parse_args():
     parser.add_argument("--eager-interval", type=int, default=60, help="Interval for eager mode (seconds)")
     parser.add_argument("--req-interval", type=int, default=10, help="Interval between requests to avoid rate limits")
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent order attempts during eager mode")
-    parser.add_argument("--refresh-time", type=str, default="07:05", help="Schedule refresh time (HH:MM format)")
+    parser.add_argument("--refresh-time", type=str, default="07:04", help="Schedule refresh HH:MM, between 6:55-7:29")
     parser.add_argument("--max-retries", type=int, default=5, help="Retry attempts for server errors")
     parser.add_argument("--consider-solo-fields", action="store_true", help="Consider solo fields (1 hour)")
     return parser.parse_args()
