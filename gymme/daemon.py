@@ -154,6 +154,7 @@ class GymmeDaemon:
         for i in range(max_retries):
             try:
                 return await request_fn()
+
             except GymRequestRateLimitedError as e:
                 if i < max_retries - 1:
                     delay = req_interval or 10
@@ -161,12 +162,19 @@ class GymmeDaemon:
                     await asyncio.sleep(delay)
                     continue
                 raise
+
+            except GymOverbookedError as e:
+                self.log.warning(f"Overbooked? Attempting to recover latest order: {e}.")
+                await self._recover_latest_order()
+                raise  # Early exit if overbooked error occurs
+
             except (GymRequestError, GymServerError, httpx.HTTPError) as e:
                 if i < max_retries - 1:
                     self.log.warning(f"Attempt {i + 1}/{max_retries} failed: {e}. Retrying in 0.5 seconds.")
                     await asyncio.sleep(0.5)  # Short delay before retrying
                     continue
                 raise
+
         raise Exception(f"Request failed after {max_retries} attempts")
 
     async def _make_order_attempt(self, offset: int, day: str, field: list[GymField]) -> bool:
@@ -179,25 +187,28 @@ class GymmeDaemon:
 
         try:
             payment_url = await self._request_with_retry(_make_order_fn, self.max_retries, self.req_interval)
-
-            self.log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
-            self._sc_send(
-                title="百丽宫羽毛球订单创建成功！",
-                desp=f"订单 **{order_attempt_details}** 已创建！\n请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
-            )
-            return True
-
-        except GymOverbookedError as e:
-            self.log.warning(f"Attempting to recover latest order: {e}.")
-            return await self._recover_latest_order()
-
         except Exception as e:
             self.log.error(f"Failed to create order for {order_attempt_details}: {e}")
             return False
 
+        self.log.info(f"Success! Order created, continue to payment ->\n{payment_url}")
+        self._sc_send(
+            title="百丽宫羽毛球订单创建成功！",
+            desp=f"订单 **{order_attempt_details}** 已创建！\n请在10分钟内完成支付：\n\n[{payment_url}]({payment_url})",
+        )
+        return True
+
     async def _recover_latest_order(self) -> bool:
         """Attempt to recover the latest created order if the server responded with user overbooked error."""
-        orders = await self.gym.get_orders(status="created", limit=1)
+
+        async def _get_orders_fn():
+            return await self.gym.get_orders(status="created", limit=1)
+
+        try:
+            orders = await self._request_with_retry(_get_orders_fn, self.max_retries, req_interval=3)
+        except Exception as e:
+            self.log.error(f"Failed to retrieve orders after {self.max_retries} attempts: {e}")
+            return False
 
         if not orders:
             self.log.error("No created orders found. Unable to recover latest order.")
